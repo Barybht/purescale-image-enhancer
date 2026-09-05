@@ -117,12 +117,17 @@ python enhance_image.py ./my_photos -o ./enhanced_photos --scale 2 --format WebP
 
 ---
 
-## Architecture Documentation
+## Architecture & Technical Deep Dive
 
-For complete signal processing proofs, continuous sinc interpolation formulas, asymptotic algorithmic complexity bounds, and empirical evaluation metrics, refer to [`ARCHITECTURE.md`](ARCHITECTURE.md).
+For an in-depth breakdown of the signal processing theory, algorithmic proofs, and empirical analysis, refer to [`ARCHITECTURE.md`](ARCHITECTURE.md):
+
+- **Mathematical Foundations**: Continuous 8-lobe Lanczos-4 sinc reconstruction and space-variant bilateral filtering formulas.
+- **Color Space Processing**: Orthogonal CIE $L^\ast a^\ast b^\ast$ decomposition and localized CLAHE dynamic range optimization.
+- **Complexity Analysis**: Asymptotic runtime bounds ($O(N)$ / $O(s^2 N)$) and SIMD cache-friendly access patterns.
+- **Empirical Benchmarks**: Detailed latency, throughput, and hardware comparisons against deep neural models (Real-ESRGAN, Diffusion).
 
 ---
 
 ## License
 
-This project is licensed under the MIT License. Free for personal, research, and commercial use.
+This project is open-source software licensed under the **[MIT License](LICENSE)**.
