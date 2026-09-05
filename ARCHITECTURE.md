@@ -100,11 +100,11 @@ Where $L^\ast$ denotes perceptual lightness ($0 \le L^\ast \le 100$), and $a^\as
 1. **Contextual Partitioning**: The $L^\ast$ surface is partitioned into an $M \times N$ grid of non-overlapping rectangular contextual tiles (default: $8 \times 8$).
 2. **Histogram Formulation & Dynamic Clipping**: For each tile, the local probability density function $h(k)$ across gray levels $k \in [0, 255]$ is clipped at threshold $\beta$:
    
-   $$h_{\text{clip}}(k) = \min(h(k), \, \beta)$$
+   $$h_{\mathrm{clip}}(k) = \min(h(k), \beta)$$
    
-   Where $\beta = \frac{N_{\text{pixels}}}{N_{\text{bins}}} \cdot \text{clip\_limit}$. The total accumulated clipped mass:
+   Where $\beta = \frac{N_{\mathrm{pixels}}}{N_{\mathrm{bins}}} \cdot C_{\mathrm{clip}}$ (with $C_{\mathrm{clip}}$ denoting the clip limit). The total accumulated clipped mass:
    
-   $$M_{\text{clipped}} = \sum_{k=0}^{N_{\text{bins}}-1} \max(0, \, h(k) - \beta)$$
+   $$M_{\mathrm{clipped}} = \sum_{k=0}^{N_{\mathrm{bins}}-1} \max(0, h(k) - \beta)$$
    
    is redistributed uniformly across all histogram bins prior to calculating the cumulative distribution function (CDF).
 3. **Bilinear Boundary Interpolation**: To eliminate boundary discontinuities between adjacent tiles, the transfer functions of the four nearest contextual regions are combined via continuous bilinear interpolation:
@@ -115,19 +115,19 @@ This localized enhancement brings out shadow and highlight detail while the chro
 
 ### 3.4 Spatial Frequency Accentuation via High-Pass Unsharp Masking (USM)
 
-Reconstruction filtering inherently attenuates high-frequency spectral components. High-frequency restoration is executed via unsharp masking. The low-pass blurred representation $I_{\text{LP}}$ is derived via continuous isotropic Gaussian convolution:
+Reconstruction filtering inherently attenuates high-frequency spectral components. High-frequency restoration is executed via unsharp masking. The low-pass blurred representation $I_{\mathrm{LP}}$ is derived via continuous isotropic Gaussian convolution:
 
 $$G_\sigma(x, y) = \frac{1}{2\pi \sigma^2} \exp\left(-\frac{x^2 + y^2}{2\sigma^2}\right)$$
 
-$$I_{\text{LP}} = I \ast G_\sigma$$
+$$I_{\mathrm{LP}} = I \ast G_\sigma$$
 
-Where $\sigma = \text{sharpen\_radius}$ controls the spatial bandwidth of detail extraction. The high-pass spatial gradient residual $I_{\text{HP}}$ is isolated via signal subtraction:
+Where $\sigma$ (the detail radius parameter) controls the spatial bandwidth of detail extraction. The high-pass spatial gradient residual $I_{\mathrm{HP}}$ is isolated via signal subtraction:
 
-$$I_{\text{HP}}(x, y) = I(x, y) - I_{\text{LP}}(x, y)$$
+$$I_{\mathrm{HP}}(x, y) = I(x, y) - I_{\mathrm{LP}}(x, y)$$
 
-The sharpened signal $I_{\text{sharp}}$ is synthesized by adding the weighted high-pass residual back to the base signal:
+The sharpened signal $I_{\mathrm{sharp}}$ is synthesized by adding the weighted high-pass residual back to the base signal:
 
-$$I_{\text{sharp}}(x, y) = \operatorname{clip}\left(I(x, y) + \alpha \cdot I_{\text{HP}}(x, y), \, 0, \, 255\right)$$
+$$I_{\mathrm{sharp}}(x, y) = \mathrm{clip}\left(I(x, y) + \alpha \cdot I_{\mathrm{HP}}(x, y), 0, 255\right)$$
 
 Where $\alpha \in [0.0, 3.0]$ is the sharpening gain parameter. Because the detail radius $\sigma$ is decoupled from the strength scalar $\alpha$, the operator can selectively target fine micro-textures ($\sigma \in [1.0, 2.0]$) or broad structural outlines ($\sigma \in [3.0, 5.0]$).
 
@@ -135,11 +135,11 @@ Where $\alpha \in [0.0, 3.0]$ is the sharpening gain parameter. Because the deta
 
 1. **Affine Exposure Shift**: Overall luminance offset compensation is applied via scalar field translation:
    
-   $$I_{\text{exp}}(x, y) = \operatorname{clip}\left(I(x, y) + \Delta B, \, 0, \, 255\right), \quad \Delta B \in [-50, +50]$$
+   $$I_{\mathrm{exp}}(x, y) = \mathrm{clip}\left(I(x, y) + \Delta B, 0, 255\right), \quad \Delta B \in [-50, +50]$$
 
 2. **Cylindrical Saturation Scaling**: The image is mapped to the HSV cylinder. Saturation $S \in [0, 1]$ is scaled by factor $\gamma_v \in [1.0, 1.5]$:
    
-   $$S_{\text{out}}(x, y) = \min\left(1.0, \, S_{\text{in}}(x, y) \cdot \gamma_v\right)$$
+   $$S_{\mathrm{out}}(x, y) = \min\left(1.0, S_{\mathrm{in}}(x, y) \cdot \gamma_v\right)$$
    
    Because Hue ($H$) and Value ($V$) are held invariant, color richness increases without introducing chromatic phase distortion or hue rotation.
 
@@ -149,8 +149,8 @@ Where $\alpha \in [0.0, 3.0]$ is the sharpening gain parameter. Because the deta
    
    $$
    \begin{aligned}
-   R_{\text{out}} &= \operatorname{clip}(R_{\text{in}} + \Delta T, \, 0, \, 255) \\
-   B_{\text{out}} &= \operatorname{clip}(B_{\text{in}} - 0.5 \cdot \Delta T, \, 0, \, 255)
+   R_{\mathrm{out}} &= \mathrm{clip}(R_{\mathrm{in}} + \Delta T, 0, 255) \\
+   B_{\mathrm{out}} &= \mathrm{clip}(B_{\mathrm{in}} - 0.5 \cdot \Delta T, 0, 255)
    \end{aligned}
    $$
    
@@ -158,8 +158,8 @@ Where $\alpha \in [0.0, 3.0]$ is the sharpening gain parameter. Because the deta
    
    $$
    \begin{aligned}
-   B_{\text{out}} &= \operatorname{clip}(B_{\text{in}} - \Delta T, \, 0, \, 255) \\
-   R_{\text{out}} &= \operatorname{clip}(R_{\text{in}} + 0.5 \cdot \Delta T, \, 0, \, 255)
+   B_{\mathrm{out}} &= \mathrm{clip}(B_{\mathrm{in}} - \Delta T, 0, 255) \\
+   R_{\mathrm{out}} &= \mathrm{clip}(R_{\mathrm{in}} + 0.5 \cdot \Delta T, 0, 255)
    \end{aligned}
    $$
 
