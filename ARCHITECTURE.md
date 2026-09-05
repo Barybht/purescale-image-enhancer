@@ -147,21 +147,15 @@ Where $\alpha \in [0.0, 3.0]$ is the sharpening gain parameter. Because the deta
    
    For warm shift ($\Delta T > 0$):
    
-   $$
-   \begin{aligned}
-   R_{\mathrm{out}} &= \mathrm{clip}(R_{\mathrm{in}} + \Delta T, 0, 255) \\
-   B_{\mathrm{out}} &= \mathrm{clip}(B_{\mathrm{in}} - 0.5 \cdot \Delta T, 0, 255)
-   \end{aligned}
-   $$
+   $$R_{\mathrm{out}} = \mathrm{clip}(R_{\mathrm{in}} + \Delta T, 0, 255)$$
+   
+   $$B_{\mathrm{out}} = \mathrm{clip}(B_{\mathrm{in}} - 0.5 \cdot \Delta T, 0, 255)$$
    
    For cool shift ($\Delta T < 0$):
    
-   $$
-   \begin{aligned}
-   B_{\mathrm{out}} &= \mathrm{clip}(B_{\mathrm{in}} - \Delta T, 0, 255) \\
-   R_{\mathrm{out}} &= \mathrm{clip}(R_{\mathrm{in}} + 0.5 \cdot \Delta T, 0, 255)
-   \end{aligned}
-   $$
+   $$B_{\mathrm{out}} = \mathrm{clip}(B_{\mathrm{in}} - \Delta T, 0, 255)$$
+   
+   $$R_{\mathrm{out}} = \mathrm{clip}(R_{\mathrm{in}} + 0.5 \cdot \Delta T, 0, 255)$$
 
 ---
 
