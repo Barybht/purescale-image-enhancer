@@ -64,22 +64,73 @@ Benchmarks measured on a single commodity x86-64 CPU core (Intel Xeon / AMD EPYC
 
 ---
 
-## Local Usage: Python CLI
+## Local Usage
 
-### 1. Installation
+### Installation & Dependencies
 
-Install the required standard libraries:
+The required packages differ depending on whether you are running the desktop GUI or the command-line interface:
+
+- **For Desktop GUI (Interactive)**:
+  Requires the core processing libraries plus `customtkinter` for the desktop interface:
+  ```bash
+  pip install opencv-python pillow numpy customtkinter
+  ```
+
+- **For CLI / CMD (Minimal / Headless Installation)**:
+  Only requires the core processing libraries. `customtkinter` is not needed, which makes this setup ideal for headless Linux servers, Docker containers, and automated pipelines without display drivers.
+  ```bash
+  pip install opencv-python pillow numpy
+  ```
+
+#### Dependency Breakdown
+
+| Package | CLI / CMD | Desktop GUI | Role |
+| :--- | :--- | :--- | :--- |
+| `opencv-python` | Required | Required | Core image processing: Lanczos-4 sinc scaling, bilateral denoising, CLAHE |
+| `pillow` | Required | Required | Image decoding/encoding (JPEG, WebP, PNG) and color space conversions |
+| `numpy` | Required | Required | Vectorized array operations and channel slicing |
+| `customtkinter` | Not needed | Required | Modern desktop GUI framework, themes, and UI widgets |
+
+---
+
+### Option A: Desktop GUI (Interactive & Visual)
+
+Recommended for users who prefer an interactive visual interface with real-time controls, instant before/after comparison, and pan/zoom inspection.
+
+Launch the native desktop application:
 
 ```bash
-pip install opencv-python pillow numpy
+python gui.py
 ```
 
-### 2. Single Image Enhancement
+**Key Features:**
+- **Real-Time Controls**: Sliders and toggles for scale factor, sharpen intensity, radius, bilateral denoising, adaptive contrast (CLAHE), brightness, vibrance, and white balance.
+- **Detailed Option Tooltips**: Hover over the `(?)` badge next to any setting for contextual parameter explanations.
+- **Interactive Zoom & Pan Preview**:
+  - Zoom toolbar (`-`, `+`, `Fit`, `100%`) or mouse wheel scrolling to inspect fine details up to 1500%.
+  - Click and drag anywhere on the preview canvas to pan across high-resolution images.
+  - Double-click to reset the view back to `Fit`.
+- **Before / After Comparison**: Toggle between **Enhanced** and **Original** views with a single click.
+- **Flexible Export**: Select container format (`PNG`, `JPEG`, `WebP`) with dynamic compression hints, and save via the native file dialog.
+- **Non-Blocking Execution**: Enhancement runs on a dedicated background worker thread so the interface stays responsive.
+
+---
+
+### Option B: Command Line Interface (CLI / CMD)
+
+Recommended for terminal users, scripting, server automation, and batch directory processing.
+
+#### 1. Single Image Enhancement
+
+Basic enhancement (default 3x upscale and balanced clarity):
 
 ```bash
-# Upscale 3x with default enhancement pipeline
 python enhance_image.py input.jpg --scale 3
+```
 
+Custom parameter tuning:
+
+```bash
 # Sharpen micro-textures with custom radius and contrast lift
 python enhance_image.py input.jpg --scale 2 --sharpen 1.4 --radius 1.8 --contrast-boost 2.5
 
@@ -90,7 +141,9 @@ python enhance_image.py input.jpg --denoise-intensity 70 --brightness 15 --forma
 python enhance_image.py input.jpg -o ./output/enhanced_photo.png --scale 3
 ```
 
-### 3. Batch Directory Processing
+#### 2. Batch Directory Processing
+
+Process an entire folder of photos with one command:
 
 ```bash
 # Enhance all images in a folder and export as modern WebP
