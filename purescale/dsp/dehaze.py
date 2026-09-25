@@ -97,6 +97,7 @@ def atmospheric_dehaze(
     strength: float = 0.65,
     transmission_floor: float = 0.10,
     patch_radius: int = 7,
+    proxy_max_dim: int = 640,
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
     Applies Dark Channel Prior dehazing to restore scene radiance.
@@ -106,6 +107,11 @@ def atmospheric_dehaze(
         strength: Dehazing intensity factor in range [0.0, 1.0]
         transmission_floor: Minimum transmission t_0 to prevent noise explosion in distant sky
         patch_radius: Patch radius for dark channel erosion
+        proxy_max_dim: Long-edge cap for dark-channel/airlight/coarse-transmission
+            estimation. Larger images use a downsampled proxy (~9x fewer pixels
+            at 1080p); the coarse map is upsampled and refined with the
+            full-resolution guide, preserving edge alignment. Set to 0 to
+            always run the full-resolution path.
 
     Returns:
         Tuple of (dehazed_bgr uint8, refined_transmission_map float32)
@@ -113,15 +119,33 @@ def atmospheric_dehaze(
     if strength <= 0.01:
         return img_bgr, np.ones(img_bgr.shape[:2], dtype=np.float32)
 
-    img_norm = img_bgr.astype(np.float32) / 255.0
+    h, w = img_bgr.shape[:2]
+    if proxy_max_dim > 0 and max(h, w) > proxy_max_dim:
+        scale = proxy_max_dim / float(max(h, w))
+        proxy = cv2.resize(img_bgr, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        proxy_norm = proxy.astype(np.float32) / 255.0
+        # Keep the physical patch size roughly constant across scales.
+        proxy_radius = max(2, int(round(patch_radius * scale)))
 
-    # 1. Dark Channel & Atmospheric Airlight
-    dark_ch = compute_dark_channel(img_norm, patch_radius=patch_radius)
-    airlight = estimate_atmospheric_light(img_norm, dark_ch)
+        dark_ch = compute_dark_channel(proxy_norm, patch_radius=proxy_radius)
+        airlight = estimate_atmospheric_light(proxy_norm, dark_ch)
 
-    # 2. Coarse Transmission Map with strength-scaled omega
-    omega = 0.95 * np.clip(strength, 0.1, 1.0)
-    coarse_t = estimate_transmission_map(img_norm, airlight, omega=omega, patch_radius=patch_radius)
+        omega = 0.95 * np.clip(strength, 0.1, 1.0)
+        coarse_small = estimate_transmission_map(
+            proxy_norm, airlight, omega=omega, patch_radius=proxy_radius
+        )
+        coarse_t = cv2.resize(coarse_small, (w, h), interpolation=cv2.INTER_LINEAR)
+        img_norm = img_bgr.astype(np.float32) / 255.0
+    else:
+        img_norm = img_bgr.astype(np.float32) / 255.0
+
+        # 1. Dark Channel & Atmospheric Airlight
+        dark_ch = compute_dark_channel(img_norm, patch_radius=patch_radius)
+        airlight = estimate_atmospheric_light(img_norm, dark_ch)
+
+        # 2. Coarse Transmission Map with strength-scaled omega
+        omega = 0.95 * np.clip(strength, 0.1, 1.0)
+        coarse_t = estimate_transmission_map(img_norm, airlight, omega=omega, patch_radius=patch_radius)
 
     # 3. Refine Transmission with Fast Guided Filter using grayscale guide
     gray_guide = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0

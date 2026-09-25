@@ -217,19 +217,19 @@ PureScale 4.0 deploys a dual-engine hardware acceleration layer:
 1. **Microsoft DirectML (DirectX 12)**: Dispatches neural tensor graphs (`Conv2D`, `PReLU`, `PixelShuffle`) directly to modern GPU compute units (such as AMD Radeon 760M / RDNA 3).
 2. **Zen 4 AVX-512 / AVX2 Vector Extensions**: Dispatches DSP primitives (SWF, EASU, CAS, BIMEF, Pyramids, Dehaze, Oklab) across vector SIMD registers with cache-friendly row-major memory traversal.
 
-| Pipeline Stage | Engine | Asymptotic Complexity | Hardware Target | Latency (1080p -> 4K) |
+| Pipeline Stage | Engine | Asymptotic Complexity | Hardware Target | Latency (1080p, balanced) |
 | :--- | :--- | :--- | :--- | :--- |
-| **Diagnostics (Stage -1)** | Analytical Wavelet | $O(N)$ | Zen 4 CPU AVX-512 | ~4 ms |
-| **Semantic Parsing (-0.5)**| Multi-Cue Guided | $O(N)$ | Zen 4 CPU AVX-512 | ~3 ms |
-| **Shock Deblur (Stage 0)** | Structure Tensor | $O(N)$ | Zen 4 CPU AVX-512 | ~5 ms |
-| **Dehaze (Stage 1)** | Dark Channel Guided | $O(N)$ | Zen 4 CPU AVX-512 | ~6 ms |
-| **EASU Super-Res (Stage 2)**| Anisotropic Sinc | $O(s^2 N)$ | Zen 4 CPU AVX-512 | ~12 ms |
-| **Multiscale Pyramids (3)** | 4-Octave Laplacian | $O(N)$ | Zen 4 CPU AVX-512 | ~6 ms |
-| **BIMEF Dynamic Range (4)**| Anchored S-Curve | $O(N)$ | Zen 4 CPU AVX-512 | ~4 ms |
-| **CAS Sharpening (Stage 5)**| Bound-Clamped CAS | $O(N)$ | Zen 4 CPU AVX-512 | ~3 ms |
-| **Oklab Vibrance (Stage 6)**| LMS Photoreceptor | $O(N)$ | Zen 4 CPU AVX-512 | ~2 ms |
-| **Bradford CAT16 (Stage 7)**| Von Kries Transform | $O(N)$ | Zen 4 CPU AVX-512 | ~1 ms |
-| **PureDSP Mode (Total)** | Complete Analytical | $O(N)$ | AMD Zen 4 CPU | **~38 ms** |
+| **Diagnostics (Stage -1)** | Analytical Wavelet | $O(N)$ | Zen 4 CPU AVX-512 | ~90 ms |
+| **Semantic Parsing (-0.5)**| Multi-Cue Guided | $O(N)$ | Zen 4 CPU AVX-512 | ~174 ms |
+| **Shock Deblur (Stage 0)** | Structure Tensor | $O(N)$ | Zen 4 CPU AVX-512 | — (off by default) |
+| **Dehaze (Stage 1)** | Dark Channel Guided | $O(N)$ | Zen 4 CPU AVX-512 | — (off by default; ~218 ms at 0.65) |
+| **EASU Super-Res (Stage 2)**| Anisotropic Sinc | $O(s^2 N)$ | Zen 4 CPU AVX-512 | ~522 ms (1080p → 4K) |
+| **Multiscale Pyramids (3)** | 4-Octave Laplacian | $O(N)$ | Zen 4 CPU AVX-512 | ~96 ms |
+| **BIMEF Dynamic Range (4)**| Anchored S-Curve | $O(N)$ | Zen 4 CPU AVX-512 | ~186 ms |
+| **CAS Sharpening (Stage 5)**| Bound-Clamped CAS | $O(N)$ | Zen 4 CPU AVX-512 | ~228 ms |
+| **Oklab Vibrance (Stage 6)**| LMS Photoreceptor | $O(N)$ | Zen 4 CPU AVX-512 | ~306 ms |
+| **Bradford CAT16 (Stage 7)**| Von Kries Transform | $O(N)$ | Zen 4 CPU AVX-512 | — (off by default) |
+| **PureDSP Mode (Total)** | Complete Analytical | $O(N)$ | AMD Zen 4 CPU | **~2.0 s** |
 | **Neural AI Mode (Total)** | 6-Block CNN + Pyramids | $O(\text{CNN}) + O(N)$ | AMD Radeon 760M (DirectML) | **~360 ms** |
 | **Hybrid Mode (Total)** | AI + Multiscale DSP | $O(\text{CNN}) + O(N)$ | DirectML GPU + Zen CPU | **~420 ms** |
 
@@ -241,7 +241,7 @@ Evaluated across commodity laptop hardware (AMD Ryzen 5 PRO 7640HS + Radeon 760M
 
 | Architecture | Paradigm | 1080p $\rightarrow$ 4K Latency | Peak Memory | Determinism | Hallucination Risk |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **PureScale 4.0 (PureDSP)** | Analytical Multiscale DSP | **~38 ms** | **~62 MB** | **100% Bitwise** | **0% (None)** |
+| **PureScale 4.0 (PureDSP)** | Analytical Multiscale DSP | **~2.0 s** | **~62 MB** | **100% Bitwise** | **0% (None)** |
 | **PureScale 4.0 (Hybrid)** | AI + Multiscale DSP | **~420 ms** | **~195 MB** | High Reproducibility | Minimal |
 | **PureScale 4.0 (Neural AI)**| Compact Edge CNN | **~360 ms** | **~145 MB** | DirectML Consistent | Low |
 | **Real-ESRGAN (Full CPU)** | 23-Block RRDBNet | ~14,200 ms | ~1,850 MB | Non-deterministic | Moderate-High |

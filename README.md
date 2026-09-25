@@ -6,7 +6,7 @@
 [![DirectML](https://img.shields.io/badge/DirectML-GPU%20Accelerated-0078D4?style=flat-square&logo=windows&logoColor=white)](https://github.com/microsoft/DirectML)
 [![NumPy](https://img.shields.io/badge/NumPy-Vectorized-013243?style=flat-square&logo=numpy&logoColor=white)](https://numpy.org/)
 [![Hardware](https://img.shields.io/badge/Hardware-DirectML%20GPU%20%2B%20AVX512%20CPU-24292e?style=flat-square&logo=amd&logoColor=white)](https://github.com/)
-[![Latency](https://img.shields.io/badge/Latency-~35ms%20(PureDSP)-success?style=flat-square)](https://github.com/)
+[![Latency](https://img.shields.io/badge/Latency-~2s%20(1080p%20PureDSP)-blue?style=flat-square)](BENCH.md)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
 PureScale 4.0 is an autonomous, multiscale computational vision and edge neural restoration engine. It unifies physical signal diagnostics, Dark Channel Prior atmospheric dehazing, 4-octave Local Laplacian pyramid filtering, soft semantic region guidance, and lightweight edge neural super-resolution (Real-ESRGAN Compact) with hardware acceleration across AMD Radeon GPUs and Zen CPUs.
@@ -39,7 +39,7 @@ PureScale 4.0 is an autonomous, multiscale computational vision and edge neural 
 
 | Mode | Technology Stack | Hardware Target | Latency | Primary Advantage |
 | :--- | :--- | :--- | :--- | :--- |
-| **PureDSP** | EASU + Laplacian Pyramids + Dehaze + CAS + SWF + BIMEF + Oklab + CAT16 | AMD Zen 4 CPU (AVX-512) | **~35-50 ms** | 100% bitwise deterministic, zero neural weights, zero hallucination. |
+| **PureDSP** | EASU + Laplacian Pyramids + Dehaze + CAS + SWF + BIMEF + Oklab + CAT16 | AMD Zen 4 CPU (AVX-512) | **~0.7–5.0 s (resolution-dependent)** | 100% bitwise deterministic, zero neural weights, zero hallucination. |
 | **Neural AI** | Real-ESRGAN General x4v3 (~4.87 MB ONNX) + Laplacian Pyramids | AMD Radeon 760M (DirectML GPU) | ~350-500 ms | Deep perceptual edge synthesis and compression artifact removal. |
 | **Hybrid** | Neural Super-Resolution + Multiscale Pyramids + Pinned BIMEF + Oklab + CAS | DirectML GPU + Zen CPU | ~400-600 ms | Neural edge reconstruction with pure mathematical color science and halo-free micro-clarity. |
 
@@ -64,14 +64,16 @@ PureScale 4.0 is an autonomous, multiscale computational vision and edge neural 
 
 ## Performance Benchmark
 
-Benchmarks measured on AMD Ryzen 5 PRO 7640HS (Zen 4 AVX-512) and AMD Radeon 760M (DirectML GPU):
+PureDSP figures re-measured with `bench/bench.py` (balanced preset, deterministic
+fixtures) on AMD64 CPU; historical neural figures below are DirectML-GPU
+estimates pending re-measurement on reference hardware:
 
 | Input Resolution | Scaling Factor | Output Resolution | PureDSP Mode | Hybrid Mode | Neural AI Mode |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| 512 x 512 (0.26 MP) | 2.0x | 1024 x 1024 (1.05 MP) | **~15 ms** | ~140 ms | ~120 ms |
-| 1280 x 720 (0.92 MP) | 2.0x | 2560 x 1440 (3.68 MP) | **~28 ms** | ~280 ms | ~240 ms |
-| 1920 x 1080 (2.07 MP) | 2.0x | 3840 x 2160 (4K UHD) | **~38 ms** | ~420 ms | ~360 ms |
-| 3840 x 2160 (8.29 MP) | 2.0x | 7680 x 4320 (8K UHD) | **~150 ms** | ~1,450 ms | ~1,250 ms |
+| 512 x 512 (0.26 MP) | 2.0x | 1024 x 1024 (1.05 MP) | **~0.7 s** | ~140 ms | ~120 ms |
+| 1280 x 720 (0.92 MP) | 2.0x | 2560 x 1440 (3.68 MP) | **~2.3 s** | ~280 ms | ~240 ms |
+| 1920 x 1080 (2.07 MP) | 2.0x | 3840 x 2160 (4K UHD) | **~5.0 s** | ~420 ms | ~360 ms |
+| 3840 x 2160 (8.29 MP) | 2.0x | 7680 x 4320 (8K UHD) | **~20 s** | ~1,450 ms | ~1,250 ms |
 
 Peak RAM footprint remains strictly bounded under **65 MB** for PureDSP and under **280 MB** for Neural/Hybrid modes via overlap tiling.
 Comprehensive stage latency benchmarks are documented in [`BENCH.md`](BENCH.md).

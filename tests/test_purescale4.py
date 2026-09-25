@@ -160,6 +160,32 @@ class TestPureScale4SemanticAndDehaze(unittest.TestCase):
         self.assertEqual(trans.shape, (128, 128))
         self.assertTrue(np.all(trans >= 0.09))
 
+    def test_dcp_dehaze_proxy_consistency(self):
+        # Proxy estimation must stay near-identical to the full-res path
+        # while actually removing haze (contrast gain), deterministically.
+        from purescale.quality import compare_images
+
+        rng = np.random.default_rng(21)
+        h, w = 320, 480
+        x = np.linspace(0, 1, w, dtype=np.float32)[None, :].repeat(h, axis=0)
+        base = np.stack([x * 180 + 30, x * 150 + 40, x * 160 + 30], axis=-1)
+        hazy = np.clip(base * 0.55 + 90 + rng.normal(0, 4.0, base.shape), 0, 255).astype(np.uint8)
+
+        full, _ = atmospheric_dehaze(hazy, strength=0.65, proxy_max_dim=0)
+        proxy, _ = atmospheric_dehaze(hazy, strength=0.65, proxy_max_dim=160)
+        metrics = compare_images(full, proxy)
+        self.assertGreater(metrics["ssim"], 0.98)
+        self.assertGreater(metrics["psnr_db"], 35.0)
+
+        def contrast(im):
+            g = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY).astype(np.float32)
+            return float(cv2.Laplacian(g, cv2.CV_32F, ksize=3).std())
+
+        self.assertGreater(contrast(proxy), contrast(hazy))
+
+        again, _ = atmospheric_dehaze(hazy, strength=0.65, proxy_max_dim=160)
+        self.assertTrue(np.array_equal(proxy, again))
+
 
 class TestPureScale4SideWindowFilter(unittest.TestCase):
     """Tests luminance-selection SWF: determinism, denoising, edge preservation."""

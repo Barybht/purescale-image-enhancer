@@ -62,6 +62,30 @@ All advanced computer vision algorithms enabled simultaneously:
 | **Portrait Retouch** | Fast Guided Filter skin smoothing | 12.46 ms | 0.5% |
 | **Oklab Vibrance** | Perceptual LMS cone chroma modulation | 356.29 ms | 15.5% |
 
+### Post-Optimization: 1080p Balanced, Scale 1.0x (Phase 2b)
+
+Re-measured after the luminance-selection SWF, Oklab transfer LUTs, and
+dehaze proxy (same machine class, `bench/bench.py` deterministic fixture,
+dehazing off per balanced defaults):
+
+- **Total**: `~1958 ms` (was `~2294 ms`, ~15% faster)
+
+| Pipeline Stage | Latency (ms) |
+| :--- | :--- |
+| **Diagnostics** | 90.1 ms |
+| **Semantic Parsing** | 174.4 ms |
+| **SWF Denoise** | 844.1 ms |
+| **Laplacian Pyramid** | 96.1 ms |
+| **BIMEF Fusion** | 186.0 ms |
+| **CAS Sharpening** | 228.3 ms |
+| **Portrait Retouch** | 20.4 ms |
+| **Oklab Vibrance** | 306.4 ms |
+
+Standalone wins folded into the total, each measured in isolation:
+SWF stage ~2.0x (244 ms → 122 ms on a 640x480 noisy fixture),
+Oklab vibrance ~1.5x (155 ms → 106 ms on a 960x640 fixture),
+dehaze ~1.9x (408 ms → 218 ms at 1080p, strength 0.65).
+
 ---
 
 ## Architectural Insights & Optimizations
