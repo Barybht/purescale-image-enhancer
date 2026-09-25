@@ -64,14 +64,12 @@ class PureScaleApp(ctk.CTk):
 
     def _detect_hardware(self) -> None:
         """Determines active hardware acceleration device name."""
-        self.hardware_info = "AMD Ryzen 5 (Zen 4 AVX-512)"
-        try:
-            import onnxruntime as ort
-            providers = ort.get_available_providers()
-            if "DmlExecutionProvider" in providers:
-                self.hardware_info = "AMD Radeon 760M (DirectML GPU)"
-        except (ImportError, AttributeError, RuntimeError, OSError) as e:
-            logger.debug("Hardware detection via ONNX Runtime skipped: %s", e)
+        from purescale.device import cpu_label, has_directml
+
+        if has_directml():
+            self.hardware_info = "DirectML GPU"
+        else:
+            self.hardware_info = cpu_label()
 
     def _build_layout(self) -> None:
         """Constructs application UI hierarchy."""

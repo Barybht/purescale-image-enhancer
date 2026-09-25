@@ -420,5 +420,43 @@ class TestPureScale4CodeIntegrity(unittest.TestCase):
         self.assertEqual(disallowed_emoji_count, 0, msg)
 
 
+class TestPureScale4Packaging(unittest.TestCase):
+    """Tests version centralization, preset strictness, and device detection."""
+
+    def test_version_consistency(self):
+        import re
+        import purescale
+
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        with open(os.path.join(repo_root, "pyproject.toml"), encoding="utf-8") as fp:
+            pyproject = fp.read()
+        match = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, flags=re.MULTILINE)
+        self.assertIsNotNone(match, "pyproject.toml must declare a version")
+        self.assertEqual(purescale.__version__, match.group(1))
+
+    def test_unknown_preset_raises(self):
+        from purescale.config import get_preset_config
+
+        with self.assertRaises(ValueError):
+            get_preset_config("not-a-preset")
+
+    def test_diagnostics_result_single_source(self):
+        from purescale.config import DiagnosticsResult as FromConfig
+        from purescale.dsp.diagnostics import DiagnosticsResult as FromDsp
+
+        self.assertIs(FromConfig, FromDsp)
+
+    def test_device_selection(self):
+        from purescale.device import cpu_label, has_directml, select_providers
+
+        self.assertTrue(cpu_label())
+        self.assertIsInstance(has_directml(), bool)
+        providers, name = select_providers(DeviceTarget.CPU)
+        self.assertEqual(providers, ["CPUExecutionProvider"])
+        self.assertTrue(name)
+        with self.assertRaises(ImportError):
+            select_providers(DeviceTarget.OPENCV_DNN)
+
+
 if __name__ == "__main__":
     unittest.main()

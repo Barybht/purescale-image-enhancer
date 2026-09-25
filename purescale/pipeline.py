@@ -26,6 +26,7 @@ from purescale.dsp.pyramid import multiscale_laplacian_filter
 from purescale.dsp.restore import directional_subpixel_depixelate, tensor_steered_shock_filter
 from purescale.dsp.semantic import compute_spatial_guidance_maps, extract_semantic_masks
 from purescale.dsp.upsample import edge_adaptive_upsample
+from purescale.device import cpu_label
 from purescale.neural.engine import NeuralSuperResEngine
 from purescale.neural.portrait import PortraitRetoucher
 
@@ -83,7 +84,7 @@ class PureScalePipeline:
         t_start = time.perf_counter()
         stage_latencies = {}
         faces_detected = 0
-        active_backend = "Zen 4 CPU (AVX-512 / AVX2)"
+        active_backend = f"{cpu_label()} (DSP)"
 
         cur = img.copy()
         is_grayscale = (cur.ndim == 2)

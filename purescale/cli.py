@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageOps
 
+from purescale import __version__
 from purescale.config import (
     DeviceTarget,
     PipelineConfig,
@@ -175,6 +176,7 @@ def main(args: List[str] = None) -> int:
     )
     parser.add_argument("--quiet", "-q", action="store_true", help="Suppress per-file progress output (errors still go to stderr)")
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON instead of human-readable text")
+    parser.add_argument("-V", "--version", action="version", version=f"PureScale {__version__}")
 
     # Advanced CV Parameters (default None = keep preset value; explicit flag wins)
     parser.add_argument("--dehaze", type=float, default=None, help="Dark Channel Prior atmospheric dehazing strength (0.0 to 1.0)")

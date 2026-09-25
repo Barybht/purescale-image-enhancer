@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 
 from purescale.config import DeviceTarget
+from purescale.device import select_providers
 from purescale.neural.models import get_default_model_path
 from purescale.neural.tiling import tile_process
 
@@ -40,32 +41,12 @@ class NeuralSuperResEngine:
         if not self.model_path or not os.path.exists(self.model_path):
             raise FileNotFoundError(f"Model file not found: {self.model_path}")
 
-        # Attempt to use ONNX Runtime with DirectML or CPU
+        # Attempt to use ONNX Runtime with DirectML or CPU.
+        # Provider selection and display names live in purescale.device.
         try:
             import onnxruntime as ort
 
-            providers = ort.get_available_providers()
-
-            chosen_providers = []
-            if self.target_device == DeviceTarget.DIRECTML_GPU:
-                if "DmlExecutionProvider" in providers:
-                    chosen_providers = ["DmlExecutionProvider", "CPUExecutionProvider"]
-                    self.backend_name = "DirectML GPU (AMD Radeon / DirectX 12)"
-                else:
-                    chosen_providers = ["CPUExecutionProvider"]
-                    self.backend_name = "CPU AVX-512 (DML Unavailable)"
-            elif self.target_device == DeviceTarget.CPU:
-                chosen_providers = ["CPUExecutionProvider"]
-                self.backend_name = "CPU (Zen AVX-512 / AVX2)"
-            elif self.target_device == DeviceTarget.OPENCV_DNN:
-                raise ImportError("Forced OpenCV DNN fallback requested")
-            else:  # AUTO
-                if "DmlExecutionProvider" in providers:
-                    chosen_providers = ["DmlExecutionProvider", "CPUExecutionProvider"]
-                    self.backend_name = "DirectML GPU (AMD Radeon / DirectX 12)"
-                else:
-                    chosen_providers = ["CPUExecutionProvider"]
-                    self.backend_name = "CPU (Zen AVX-512 / AVX2)"
+            chosen_providers, self.backend_name = select_providers(self.target_device)
 
             # Configure session options for optimal concurrency
             sess_opts = ort.SessionOptions()

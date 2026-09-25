@@ -5,6 +5,21 @@ from enum import Enum
 from typing import Any, Dict, Optional
 import numpy as np
 
+# Canonical definition lives in purescale.dsp.diagnostics (re-exported here
+# for backward compatibility: `from purescale.config import DiagnosticsResult`
+# keeps working, but there is exactly one class object).
+from purescale.dsp.diagnostics import DiagnosticsResult
+
+__all__ = [
+    "ProcessingMode",
+    "DeviceTarget",
+    "DiagnosticsResult",
+    "PipelineConfig",
+    "ProcessingResult",
+    "PRESETS",
+    "get_preset_config",
+]
+
 
 class ProcessingMode(str, Enum):
     """Execution mode selection."""
@@ -19,60 +34,6 @@ class DeviceTarget(str, Enum):
     DIRECTML_GPU = "directml"  # Microsoft DirectML (AMD Radeon 760M / Intel / NVIDIA GPUs)
     CPU = "cpu"                # Pure CPU execution (Zen 4 AVX-512 / AVX2 vector SIMD)
     OPENCV_DNN = "opencv"      # Built-in OpenCV DNN module (zero external dependencies)
-
-
-@dataclass
-class DiagnosticsResult:
-    """Strongly-typed physical signal diagnostics and quality metrics."""
-    noise_sigma: float = 0.0          # Estimated Gaussian noise sigma (0.0 to 100.0)
-    noise_category: str = "Clean"     # "Clean", "Low", "Moderate", "Heavy"
-    blur_score: float = 0.0           # Optical/motion blur index (0.0=sharp, 1.0=heavily blurred)
-    blur_category: str = "Sharp"      # "Sharp", "Acceptable", "Soft", "Blurred"
-    entropy: float = 0.0              # Shannon luminance entropy (0.0 to 8.0 bits)
-    dynamic_range: int = 255          # 99th minus 1st percentile luminance spread
-    shadow_clipping: float = 0.0      # Shadow under-exposure percentage (Y < 5)
-    highlight_clipping: float = 0.0   # Highlight blowout percentage (Y > 250)
-    mean_luminance: float = 128.0     # Mean luminance level (0.0 to 255.0)
-    color_cast_kelvin: int = 0        # Recommended white-balance temperature shift (-100 to 100)
-    color_cast_name: str = "Neutral"  # "Neutral", "Warm", "Cool", "Green", "Magenta"
-    haze_index: float = 0.0           # Atmospheric veiling index (0.0=clear, 1.0=dense haze)
-    haze_detected: bool = False       # True if haze index exceeds atmospheric threshold
-    semantic_breakdown: Dict[str, float] = field(default_factory=dict)
-    recommended_parameters: Dict[str, Any] = field(default_factory=dict)
-
-    def summary_table(self) -> str:
-        """Returns a formatted ASCII summary of diagnostic telemetry."""
-        width = 64
-        border = "+" + "-" * (width - 2) + "+"
-
-        def row(text: str) -> str:
-            return f"| {text:<{width - 4}} |"
-
-        lines = [
-            border,
-            row("PURESCALE 4.0 SIGNAL DIAGNOSTICS"),
-            border,
-            row(f"Sensor Noise Sigma  : {self.noise_sigma:6.2f} / 100 [{self.noise_category:<8}]"),
-            row(f"Optical Blur Score  : {self.blur_score:6.3f}       [{self.blur_category:<10}]"),
-            row(f"Dynamic Entropy     : {self.entropy:6.2f} bits    [Range: {self.dynamic_range:<3} levels]"),
-            row(f"Shadow/High Clipping: {self.shadow_clipping:5.1f}% / {self.highlight_clipping:4.1f}%"),
-            row(f"Color Cast Offset   : {self.color_cast_kelvin:+5d}        [{self.color_cast_name:<8}]"),
-            row(f"Atmospheric Haze    : {self.haze_index:6.3f}       [{'HAZY' if self.haze_detected else 'CLEAR':<8}]"),
-        ]
-        if self.semantic_breakdown:
-            items = [f"{k}: {v * 100:.0f}%" for k, v in self.semantic_breakdown.items() if v > 0.05]
-            # Wrap across multiple fixed-width rows instead of truncating.
-            current = "Scene Semantics     : "
-            for item in items:
-                candidate = item if current.endswith(": ") else current + ", " + item
-                if len(candidate) > width - 4:
-                    lines.append(row(current))
-                    current = "                      " + item
-                else:
-                    current = candidate
-            lines.append(row(current if items else "Scene Semantics     : General"))
-        lines.append(border)
-        return "\n".join(lines)
 
 
 @dataclass
@@ -332,10 +293,16 @@ PRESETS: Dict[str, Dict[str, Any]] = {
 
 
 def get_preset_config(preset_name: str, base_config: Optional[PipelineConfig] = None) -> PipelineConfig:
-    """Returns a PipelineConfig populated with parameters from named preset."""
+    """Returns a PipelineConfig populated with parameters from named preset.
+
+    Raises:
+        ValueError: If ``preset_name`` is not a known preset. Use
+            ``sorted(PRESETS)`` to list valid names.
+    """
     cfg = PipelineConfig() if base_config is None else PipelineConfig(**base_config.to_dict())
     key = preset_name.lower().strip()
-    if key in PRESETS:
-        for param, val in PRESETS[key].items():
-            setattr(cfg, param, val)
+    if key not in PRESETS:
+        raise ValueError(f"Unknown preset: {preset_name!r}. Available: {sorted(PRESETS)}")
+    for param, val in PRESETS[key].items():
+        setattr(cfg, param, val)
     return cfg
