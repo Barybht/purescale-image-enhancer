@@ -1,5 +1,6 @@
 """Automated verification test suite for PureScale 4.0 Advanced Computer Vision."""
 
+import math
 import os
 import sys
 import unittest
@@ -496,6 +497,75 @@ class TestPureScale4Packaging(unittest.TestCase):
         self.assertTrue(name)
         with self.assertRaises(ImportError):
             select_providers(DeviceTarget.OPENCV_DNN)
+
+
+class TestPureScale4Golden(unittest.TestCase):
+    """Golden regression tests: output-changing optimizations must not
+    silently degrade quality. Thresholds tolerate cross-platform numeric
+    noise but fail on real regressions (regenerate fixtures intentionally
+    via tests/fixtures/generate_goldens.py and document the delta)."""
+
+    def test_golden_outputs(self):
+        from tests.fixtures.generate_goldens import golden_config, make_inputs
+        from purescale.quality import compare_images
+
+        fixture_dir = os.path.join(os.path.dirname(__file__), "fixtures")
+        pipeline = PureScalePipeline()
+        cfg = golden_config()
+        for name, img in make_inputs().items():
+            with self.subTest(fixture=name):
+                ref = cv2.imread(os.path.join(fixture_dir, f"golden_{name}.png"))
+                self.assertIsNotNone(ref, f"Missing golden fixture: {name}")
+                res = pipeline.enhance(img, config=cfg)
+                metrics = compare_images(ref, res.image)
+                self.assertGreater(metrics["ssim"], 0.999, f"SSIM regression on {name}")
+                self.assertGreater(metrics["psnr_db"], 60.0, f"PSNR regression on {name}")
+
+
+class TestPureScale4Quality(unittest.TestCase):
+    """Tests reference-based quality metrics and the compare command."""
+
+    def test_psnr_ssim_identities(self):
+        from purescale.quality import compare_images
+
+        rng = np.random.default_rng(5)
+        img = rng.integers(0, 256, (48, 48, 3)).astype(np.uint8)
+        m = compare_images(img, img.copy())
+        self.assertEqual(m["psnr_db"], math.inf)
+        self.assertAlmostEqual(m["ssim"], 1.0, places=5)
+
+    def test_psnr_ssim_sensitivity(self):
+        from purescale.quality import compare_images
+
+        base = np.full((48, 48, 3), 128, dtype=np.uint8)
+        noisy = np.clip(base.astype(np.int16) + 25, 0, 255).astype(np.uint8)
+        m = compare_images(base, noisy)
+        self.assertLess(m["psnr_db"], 25.0)
+        self.assertLess(m["ssim"], 0.99)
+
+    def test_quality_shape_mismatch(self):
+        from purescale.quality import compare_images
+
+        with self.assertRaises(ValueError):
+            compare_images(np.zeros((8, 8, 3), dtype=np.uint8),
+                           np.zeros((16, 16, 3), dtype=np.uint8))
+
+    def test_cli_compare(self):
+        from purescale.cli import main_compare
+
+        d = os.path.abspath("test_compare_tmp")
+        os.makedirs(d, exist_ok=True)
+        try:
+            a = os.path.join(d, "a.png")
+            b = os.path.join(d, "b.png")
+            cv2.imwrite(a, np.full((32, 32, 3), 100, dtype=np.uint8))
+            cv2.imwrite(b, np.full((32, 32, 3), 110, dtype=np.uint8))
+            self.assertEqual(main_compare([a, b]), 0)
+            self.assertEqual(main_compare([a, b, "--json"]), 0)
+            self.assertEqual(main_compare([a, os.path.join(d, "missing.png")]), 1)
+        finally:
+            import shutil
+            shutil.rmtree(d, ignore_errors=True)
 
 
 if __name__ == "__main__":

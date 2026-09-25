@@ -19,6 +19,7 @@ from purescale.config import (
 )
 from purescale.dsp.diagnostics import diagnose_image
 from purescale.pipeline import PureScalePipeline
+from purescale.quality import compare_images
 
 SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif"}
 
@@ -85,8 +86,13 @@ def save_image_with_alpha(
 
 
 def process_file(pipeline: PureScalePipeline, cfg: PipelineConfig, in_path: str, out_path: str,
-                 quiet: bool = False) -> Optional[Dict[str, Any]]:
-    """Processes a single file. Returns result dict on success, None on failure."""
+                 quiet: bool = False, reference: Optional[np.ndarray] = None) -> Optional[Dict[str, Any]]:
+    """Processes a single file. Returns result dict on success, None on failure.
+
+    When ``reference`` (uint8 BGR) is supplied, PSNR/SSIM vs the enhanced
+    output are added under ``"quality"`` if shapes match, otherwise a
+    ``"quality_error"`` string is recorded instead of failing the run.
+    """
     try:
         bgr, alpha, exif, icc = load_image_with_alpha(in_path, return_meta=True)
         h, w = bgr.shape[:2]
@@ -117,6 +123,13 @@ def process_file(pipeline: PureScalePipeline, cfg: PipelineConfig, in_path: str,
                 "haze_index": res.diagnostics.haze_index,
                 "haze_detected": res.diagnostics.haze_detected,
             }
+        if reference is not None:
+            if reference.shape == res.image.shape:
+                info["quality"] = compare_images(reference, res.image)
+            else:
+                info["quality_error"] = (
+                    f"Reference shape {reference.shape} != output shape {res.image.shape}"
+                )
         if not quiet:
             print(f"[SUCCESS] {os.path.basename(in_path)} -> {os.path.basename(out_path)}")
             print(f"  Resolution: {w}x{h} -> {out_w}x{out_h} ({cfg.scale}x)")
@@ -127,14 +140,52 @@ def process_file(pipeline: PureScalePipeline, cfg: PipelineConfig, in_path: str,
                 print(f"  Diagnostics: Noise Sigma {res.diagnostics.noise_sigma} [{res.diagnostics.noise_category}], Blur {res.diagnostics.blur_score:.2f} [{res.diagnostics.blur_category}], Haze {res.diagnostics.haze_index:.2f}")
             if res.faces_detected > 0:
                 print(f"  Faces:      {res.faces_detected} detected & retouched")
+            if "quality" in info:
+                q = info["quality"]
+                print(f"  Quality:    PSNR {q['psnr_db']:.2f} dB, SSIM {q['ssim']:.4f}")
+            elif "quality_error" in info:
+                print(f"  Quality:    skipped ({info['quality_error']})")
         return info
     except (OSError, IOError, ValueError, cv2.error, RuntimeError, MemoryError) as err:
         print(f"[ERROR] Failed to process {in_path}: {err}", file=sys.stderr)
         return None
 
 
+def main_compare(argv: List[str]) -> int:
+    """Compares two images with PSNR/SSIM. Usage: compare BEFORE AFTER [--json]."""
+    parser = argparse.ArgumentParser(
+        prog="enhance_image.py compare",
+        description="Compare two images with PSNR and SSIM (alpha channels ignored)",
+    )
+    parser.add_argument("before", help="Path to reference image")
+    parser.add_argument("after", help="Path to image to compare against reference")
+    parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+    parsed = parser.parse_args(argv)
+
+    for label, path in (("before", parsed.before), ("after", parsed.after)):
+        if not os.path.isfile(path):
+            print(f"[ERROR] {label} image does not exist: {path}", file=sys.stderr)
+            return 1
+    try:
+        ref, _ = load_image_with_alpha(parsed.before)
+        out, _ = load_image_with_alpha(parsed.after)
+        metrics = compare_images(ref, out)
+    except (OSError, ValueError, cv2.error) as err:
+        print(f"[ERROR] Comparison failed: {err}", file=sys.stderr)
+        return 1
+
+    if parsed.json:
+        print(json.dumps({"before": parsed.before, "after": parsed.after, **metrics}))
+    else:
+        print(f"PSNR: {metrics['psnr_db']:.2f} dB")
+        print(f"SSIM: {metrics['ssim']:.4f}")
+    return 0
+
+
 def main(args: List[str] = None) -> int:
     """CLI entrypoint."""
+    if args and len(args) > 0 and args[0] == "compare":
+        return main_compare(args[1:])
     parser = argparse.ArgumentParser(
         description="PureScale 4.0: Autonomous Multiscale Computational Vision & Edge AI Engine",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -203,6 +254,7 @@ def main(args: List[str] = None) -> int:
     parser.add_argument("--tile-size", type=int, default=None, help="Tile dimension for neural super-resolution (>= 32)")
     parser.add_argument("--tile-overlap", type=int, default=None, help="Tile overlap border margin (>= 0 and < tile-size)")
     parser.add_argument("--max-megapixels", type=float, default=None, help="Maximum image megapixels allowed before OOM guard aborts (default: 40.0)")
+    parser.add_argument("--reference", default=None, help="Path to ground-truth image for PSNR/SSIM quality scoring (shapes must match output)")
     parser.add_argument("-r", "--recursive", action="store_true", help="Recursively process subdirectories in input directory")
     parser.add_argument("--format", choices=["PNG", "JPEG", "WebP"], default="PNG", help="Output container format")
 
@@ -301,6 +353,17 @@ def main(args: List[str] = None) -> int:
 
     quiet = parsed.quiet or parsed.json
 
+    reference_bgr: Optional[np.ndarray] = None
+    if parsed.reference is not None:
+        if not os.path.isfile(parsed.reference):
+            print(f"[ERROR] Reference image does not exist: {parsed.reference}", file=sys.stderr)
+            return 1
+        try:
+            reference_bgr, _ = load_image_with_alpha(parsed.reference)
+        except (OSError, ValueError, cv2.error) as err:
+            print(f"[ERROR] Could not load reference image: {err}", file=sys.stderr)
+            return 1
+
     pipeline = PureScalePipeline(config=cfg)
 
     ext_map = {"PNG": ".png", "JPEG": ".jpg", "WebP": ".webp"}
@@ -316,7 +379,7 @@ def main(args: List[str] = None) -> int:
             base_name = os.path.splitext(os.path.basename(in_path))[0]
             out_path = os.path.join(os.path.dirname(in_path), f"{base_name}_enhanced{target_ext}")
 
-        result = process_file(pipeline, cfg, in_path, out_path, quiet=quiet)
+        result = process_file(pipeline, cfg, in_path, out_path, quiet=quiet, reference=reference_bgr)
         if parsed.json:
             print(json.dumps(result if result is not None else {"input": in_path, "error": "failed"}))
         return 0 if result is not None else 1
@@ -356,7 +419,7 @@ def main(args: List[str] = None) -> int:
             os.makedirs(os.path.dirname(dst_file), exist_ok=True)
             if not quiet:
                 print(f"\n[{idx}/{len(rel_files)}] Processing {rel_file}...")
-            info = process_file(pipeline, cfg, src_file, dst_file, quiet=quiet)
+            info = process_file(pipeline, cfg, src_file, dst_file, quiet=quiet, reference=reference_bgr)
             if info is not None:
                 successes += 1
                 results.append(info)
