@@ -25,6 +25,7 @@ from purescale.dsp.diagnostics import auto_tune_parameters, diagnose_image
 from purescale.dsp.semantic import extract_semantic_masks
 from purescale.gui.canvas import InteractiveCanvas
 from purescale.gui.components import DiagnosticsHUDCard, LabeledSlider, ParameterCard
+from purescale.gui.scrolling import SmoothScrollableFrame
 from purescale.pipeline import PureScalePipeline
 
 logger = logging.getLogger(__name__)
@@ -151,8 +152,8 @@ class PureScaleApp(ctk.CTk):
         content_frame = ctk.CTkFrame(self, fg_color="transparent")
         content_frame.pack(fill="both", expand=True)
 
-        # Left Scrollable Sidebar
-        self.sidebar = ctk.CTkScrollableFrame(
+        # Left Scrollable Sidebar (kinetic smooth scrolling; same cards API)
+        self.sidebar = SmoothScrollableFrame(
             content_frame,
             width=380,
             fg_color="#0d131f",

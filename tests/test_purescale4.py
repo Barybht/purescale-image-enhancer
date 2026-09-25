@@ -365,6 +365,65 @@ class TestPureScale4CliAndGui(unittest.TestCase):
                 raise e
 
 
+class TestPureScale4GuiScrolling(unittest.TestCase):
+    """Tests kinetic sidebar scrolling math (display-free) and routing."""
+
+    def test_wheel_pixels(self):
+        from purescale.gui.scrolling import wheel_pixels
+
+        self.assertEqual(wheel_pixels(-120, 0, 56), 56)   # one notch down
+        self.assertEqual(wheel_pixels(120, 0, 56), -56)   # one notch up
+        self.assertEqual(wheel_pixels(-240, 0, 56), 112)  # fast flick accumulates
+        self.assertEqual(wheel_pixels(0, 4, 56), -56)     # Linux Button-4 (up)
+        self.assertEqual(wheel_pixels(0, 5, 56), 56)      # Linux Button-5 (down)
+        self.assertEqual(wheel_pixels(0, 0, 56), 0)       # no input, no motion
+
+    def test_clamp_fraction(self):
+        from purescale.gui.scrolling import clamp_fraction
+
+        self.assertEqual(clamp_fraction(0.5, 0.4), 0.5)
+        self.assertEqual(clamp_fraction(-0.2, 0.4), 0.0)
+        self.assertEqual(clamp_fraction(0.9, 0.4), 0.6)   # 1 - window
+        self.assertEqual(clamp_fraction(0.3, 1.0), 0.0)   # fits entirely
+
+    def test_sidebar_smooth_scroll_routing(self):
+        from purescale.gui.app import PureScaleApp
+        from purescale.gui.scrolling import SmoothScrollableFrame
+        try:
+            import types
+            app = PureScaleApp()
+            self.assertIsInstance(app.sidebar, SmoothScrollableFrame)
+            app.update_idletasks()
+            first, last = app.sidebar._parent_canvas.yview()
+            if (first, last) == (0.0, 1.0):
+                app.destroy()
+                self.skipTest("Sidebar content fits; nothing to scroll.")
+
+            canvas = app.sidebar._parent_canvas
+
+            # Wheel over the canvas scrolls toward the bottom.
+            app.sidebar._mouse_wheel_all(types.SimpleNamespace(widget=canvas, delta=-480, num=0))
+            for _ in range(60):
+                app.sidebar._smooth_step()
+            moved, _ = canvas.yview()
+            self.assertGreater(moved, first)
+
+            # Wheel over a slider must NOT scroll (slider keeps the event).
+            app.sidebar._smooth_target = None
+            before, _ = canvas.yview()
+            app.sidebar._mouse_wheel_all(types.SimpleNamespace(widget=app.cas_slider.slider, delta=-480, num=0))
+            self.assertIsNone(app.sidebar._smooth_target)
+            after, _ = canvas.yview()
+            self.assertEqual(before, after)
+
+            app.destroy()
+        except (tk.TclError, RuntimeError, OSError) as e:
+            if "no display" in str(e).lower() or "display name" in str(e).lower():
+                self.skipTest(f"Headless display not available: {e}")
+            else:
+                raise e
+
+
 class TestPureScale4MemoryGuard(unittest.TestCase):
     """Tests 8K OOM guard against runaway spatial memory allocations."""
 
