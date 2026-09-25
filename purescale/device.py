@@ -52,6 +52,11 @@ def has_directml() -> bool:
     return "DmlExecutionProvider" in available_providers()
 
 
+def has_cuda() -> bool:
+    """Returns True when the CUDA execution provider is available."""
+    return "CUDAExecutionProvider" in available_providers()
+
+
 def gpu_label() -> str:
     """Returns a human-readable GPU identifier for DirectML-capable hosts."""
     return "DirectML GPU"
@@ -60,10 +65,14 @@ def gpu_label() -> str:
 def select_providers(target: DeviceTarget) -> Tuple[List[str], str]:
     """Maps a device target to ``(providers, backend_name)``.
 
+    Provider preference on AUTO is CUDA > DirectML > CPU. An explicit
+    ``DIRECTML_GPU``/``CUDA_GPU`` target keeps its accelerator first and
+    falls back to CPU with a labeled name when unavailable. ``OPENCV_DNN``
+    raises ``ImportError`` so callers fall through to the OpenCV DNN backend.
+
     Args:
-        target: Device target (``AUTO``, ``DIRECTML_GPU``, ``CPU``,
-            ``OPENCV_DNN``). ``OPENCV_DNN`` raises ``ImportError`` so callers
-            fall through to the OpenCV DNN backend.
+        target: Device target (``AUTO``, ``DIRECTML_GPU``, ``CUDA_GPU``,
+            ``CPU``, ``OPENCV_DNN``).
 
     Returns:
         Tuple of (provider list for ONNX Runtime, display name).
@@ -73,11 +82,17 @@ def select_providers(target: DeviceTarget) -> Tuple[List[str], str]:
         if has_directml():
             return ["DmlExecutionProvider", "CPUExecutionProvider"], f"{gpu_label()} (DirectML)"
         return ["CPUExecutionProvider"], f"{cpu} (DML Unavailable)"
+    if target == DeviceTarget.CUDA_GPU:
+        if has_cuda():
+            return ["CUDAExecutionProvider", "CPUExecutionProvider"], "CUDA GPU"
+        return ["CPUExecutionProvider"], f"{cpu} (CUDA Unavailable)"
     if target == DeviceTarget.CPU:
         return ["CPUExecutionProvider"], f"{cpu} (ONNX Runtime)"
     if target == DeviceTarget.OPENCV_DNN:
         raise ImportError("OpenCV DNN fallback requested")
     # auto
+    if has_cuda():
+        return ["CUDAExecutionProvider", "CPUExecutionProvider"], "CUDA GPU"
     if has_directml():
         return ["DmlExecutionProvider", "CPUExecutionProvider"], f"{gpu_label()} (DirectML)"
     return ["CPUExecutionProvider"], f"{cpu} (ONNX Runtime)"

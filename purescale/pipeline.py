@@ -6,7 +6,7 @@ and Hybrid Neural Edge Synthesis.
 """
 
 import time
-from typing import Callable, Optional
+from typing import Callable, Dict, Optional, Tuple
 import cv2
 import numpy as np
 
@@ -28,6 +28,7 @@ from purescale.dsp.semantic import compute_spatial_guidance_maps, extract_semant
 from purescale.dsp.upsample import edge_adaptive_upsample
 from purescale.device import cpu_label
 from purescale.neural.engine import NeuralSuperResEngine
+from purescale.neural.models import resolve_sr_model
 from purescale.neural.portrait import PortraitRetoucher
 
 
@@ -45,16 +46,34 @@ class PureScalePipeline:
     ):
         self.config = config or PipelineConfig()
         self.model_path = model_path
-        self._neural_engine: Optional[NeuralSuperResEngine] = None
+        self._neural_engines: Dict[Tuple[str, str], NeuralSuperResEngine] = {}
         self._portrait_retoucher: Optional[PortraitRetoucher] = None
 
-    def _get_neural_engine(self, target_device: DeviceTarget) -> NeuralSuperResEngine:
-        if self._neural_engine is None or self._neural_engine.target_device != target_device:
-            self._neural_engine = NeuralSuperResEngine(
-                model_path=self.model_path,
+    def _get_neural_engine(
+        self,
+        target_device: DeviceTarget,
+        target_scale: float = 4.0,
+    ) -> NeuralSuperResEngine:
+        # Scale-aware routing: a native x2 model serves target_scale <= 2
+        # directly instead of 4x inference followed by downsampling. Engines
+        # are cached per (model, device); an explicit model_path keeps the
+        # legacy single-engine behavior.
+        if self.model_path:
+            cache_key = ("explicit-path", str(target_device))
+            if cache_key not in self._neural_engines:
+                self._neural_engines[cache_key] = NeuralSuperResEngine(
+                    model_path=self.model_path,
+                    target_device=target_device,
+                )
+            return self._neural_engines[cache_key]
+        model_key = resolve_sr_model(target_scale)
+        cache_key = (model_key, str(target_device))
+        if cache_key not in self._neural_engines:
+            self._neural_engines[cache_key] = NeuralSuperResEngine(
                 target_device=target_device,
+                model_key=model_key,
             )
-        return self._neural_engine
+        return self._neural_engines[cache_key]
 
     def _get_portrait_retoucher(self) -> PortraitRetoucher:
         if self._portrait_retoucher is None:
@@ -302,7 +321,7 @@ class PureScalePipeline:
         elif mode == ProcessingMode.NEURAL_AI:
             report("Neural AI Super-Resolution (Real-ESRGAN Compact)", 0.25)
             t0 = time.perf_counter()
-            engine = self._get_neural_engine(cfg.device)
+            engine = self._get_neural_engine(cfg.device, cfg.scale)
             active_backend = engine.backend_name
 
             cur = engine.upscale(
@@ -370,7 +389,7 @@ class PureScalePipeline:
             # 2. Neural Edge Synthesis
             report("Neural Edge Synthesis (Real-ESRGAN Compact)", 0.35)
             t0 = time.perf_counter()
-            engine = self._get_neural_engine(cfg.device)
+            engine = self._get_neural_engine(cfg.device, cfg.scale)
             active_backend = engine.backend_name
 
             cur = engine.upscale(

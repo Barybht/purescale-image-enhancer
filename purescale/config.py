@@ -30,8 +30,9 @@ class ProcessingMode(str, Enum):
 
 class DeviceTarget(str, Enum):
     """Hardware acceleration target."""
-    AUTO = "auto"              # Auto-detect best: DirectML GPU -> CPU AVX-512 -> OpenCV DNN
+    AUTO = "auto"              # Auto-detect best: CUDA GPU -> DirectML GPU -> CPU -> OpenCV DNN
     DIRECTML_GPU = "directml"  # Microsoft DirectML (AMD Radeon 760M / Intel / NVIDIA GPUs)
+    CUDA_GPU = "cuda"          # NVIDIA CUDA execution provider (falls back to CPU)
     CPU = "cpu"                # Pure CPU execution (Zen 4 AVX-512 / AVX2 vector SIMD)
     OPENCV_DNN = "opencv"      # Built-in OpenCV DNN module (zero external dependencies)
 

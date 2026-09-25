@@ -8,7 +8,7 @@ import numpy as np
 
 from purescale.config import DeviceTarget
 from purescale.device import select_providers
-from purescale.neural.models import get_default_model_path
+from purescale.neural.models import MODEL_REGISTRY, ModelManager, get_default_model_path
 from purescale.neural.tiling import tile_process
 
 logger = logging.getLogger(__name__)
@@ -24,15 +24,25 @@ class NeuralSuperResEngine:
         self,
         model_path: Optional[str] = None,
         target_device: DeviceTarget = DeviceTarget.AUTO,
+        model_key: Optional[str] = None,
     ):
-        self.model_path = model_path or get_default_model_path(auto_download=True)
+        if model_key is not None:
+            if model_key not in MODEL_REGISTRY:
+                raise ValueError(f"Unknown model key: {model_key}. Available: {list(MODEL_REGISTRY.keys())}")
+            self.model_key = model_key
+            self.native_scale = int(MODEL_REGISTRY[model_key].get("scale", 4))
+            manager = ModelManager() if model_path is None else None
+            self.model_path = model_path or manager.get_model_path(model_key, auto_download=True)
+        else:
+            self.model_key = None
+            self.model_path = model_path or get_default_model_path(auto_download=True)
+            self.native_scale = 4
         self.target_device = target_device
         self.session = None
         self.opencv_net = None
         self.input_name = ""
         self.output_name = ""
         self.backend_name = "Uninitialized"
-        self.native_scale = 4
 
         self._init_backend()
 

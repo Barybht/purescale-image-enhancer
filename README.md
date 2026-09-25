@@ -134,6 +134,27 @@ python enhance_image.py landscape.jpg --mode puredsp --dehaze 0.65 --pyramid-det
 python enhance_image.py path/to/photos/ -o path/to/output/ --mode hybrid --preset landscape -r
 ```
 
+#### 5. Compare Against Ground Truth
+```bash
+python enhance_image.py compare reference.png output.png
+python enhance_image.py input.jpg --reference ground-truth.png --json
+```
+
+### Neural Models & Devices
+
+| Model Key | Task | Native Scale | Size | License |
+| :--- | :--- | :--- | :--- | :--- |
+| `realesr-general-x4v3` | super-resolution | 4x | ~4.87 MB | BSD-3-Clause |
+| `yunet-face` | face-detection | 1x | ~232 KB | Apache-2.0 |
+
+Weights download on first use into `models/` and are SHA256-verified
+(`python enhance_image.py --list-devices` shows cache status).
+Scale-aware routing picks the smallest native scale covering the requested
+magnification, so a future x2 entry would serve `--scale 2.0` directly
+instead of 4x inference followed by downsampling. Execution providers are
+preferred CUDA > DirectML > CPU on `auto`; OpenCV DNN remains the
+zero-dependency fallback.
+
 ### CLI Parameters Reference
 
 | Parameter | CLI Flag | Default | Valid Range | Description |
@@ -141,8 +162,8 @@ python enhance_image.py path/to/photos/ -o path/to/output/ --mode hybrid --prese
 | `auto_tune` | `--auto` | False | Boolean | **Autonomous Auto-Tuning**: Automatically configures parameters based on diagnostics. |
 | `diagnostics` | `--diagnostics` | False | Boolean | **Signal Diagnostics**: Prints formatted ASCII telemetry table without processing. |
 | `mode` | `--mode` | `puredsp` | `puredsp`, `neural`, `hybrid` | **Execution Engine**: Analytical DSP, Neural AI, or Hybrid mode. |
-| `device` | `--device` | `auto` | `auto`, `directml`, `cpu`, `opencv` | **Hardware Accelerator**: DirectML GPU, CPU SIMD, or OpenCV DNN fallback. |
-| `preset` | `-p`, `--preset` | None | `balanced`, `portrait`, `landscape`, `low-light`, `art` | **Parameter Profile**: Loads pre-tuned empirical parameter profiles. |
+| `device` | `--device` | `auto` | `auto`, `directml`, `cuda`, `cpu`, `opencv` | **Hardware Accelerator**: CUDA > DirectML > CPU auto-select, or forced backend (OpenCV DNN needs zero extra deps). |
+| `preset` | `-p`, `--preset` | None | `balanced`, `portrait`, `landscape`, `low-light`, `art`, `fast` | **Parameter Profile**: Loads pre-tuned empirical parameter profiles (`fast` skips heavy stages). |
 | `dehaze` | `--dehaze` | 0.0 | 0.0 - 1.0 | **Atmospheric Dehaze**: Dark Channel Prior (DCP) fog/haze removal strength. |
 | `pyramid_detail` | `--pyramid-detail` | 1.20 | 0.5 - 2.0 | **Micro-Texture Gain**: Multiscale Local Laplacian octave band L1 detail boost. |
 | `pyramid_structure`| `--pyramid-structure`| 1.10 | 0.8 - 1.8 | **Structural Gain**: Multiscale Local Laplacian octave band L2 contour boost. |

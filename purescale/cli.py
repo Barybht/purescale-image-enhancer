@@ -191,8 +191,9 @@ def main(args: List[str] = None) -> int:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    parser.add_argument("input", help="Path to input image file or directory of images")
+    parser.add_argument("input", nargs="?", help="Path to input image file or directory of images")
     parser.add_argument("-o", "--output", help="Path to output file or destination directory", default=None)
+    parser.add_argument("--list-devices", action="store_true", help="List detected accelerators and model cache status, then exit")
 
     # Autonomous Diagnostics
     parser.add_argument("--auto", action="store_true", help="Enable autonomous diagnostic auto-tuning")
@@ -207,7 +208,7 @@ def main(args: List[str] = None) -> int:
     )
     parser.add_argument(
         "--device",
-        choices=["auto", "directml", "cpu", "opencv"],
+        choices=["auto", "directml", "cuda", "cpu", "opencv"],
         default="auto",
         help="Hardware acceleration backend for neural model",
     )
@@ -259,6 +260,30 @@ def main(args: List[str] = None) -> int:
     parser.add_argument("--format", choices=["PNG", "JPEG", "WebP"], default="PNG", help="Output container format")
 
     parsed = parser.parse_args(args)
+
+    if parsed.list_devices:
+        from purescale.device import available_providers, cpu_label
+        from purescale.neural.models import ModelManager
+
+        info = {
+            "cpu": cpu_label(),
+            "providers": available_providers(),
+            "models": ModelManager().list_models(),
+        }
+        if parsed.json:
+            print(json.dumps(info, indent=2))
+        else:
+            print(f"CPU:       {info['cpu']}")
+            print(f"Providers: {', '.join(info['providers']) if info['providers'] else '(onnxruntime unavailable)'}")
+            print("Models:")
+            for m in info["models"]:
+                state = "cached+verified" if m["verified"] else ("cached" if m["cached"] else "not downloaded")
+                print(f"  {m['key']} [{m['task']}, x{m['scale']}, {m['license']}] - {state}")
+                print(f"    {m['description']}")
+        return 0
+
+    if not parsed.input:
+        parser.error("the following arguments are required: input")
 
     in_path = os.path.abspath(parsed.input)
     if not os.path.exists(in_path):

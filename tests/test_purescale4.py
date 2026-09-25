@@ -594,5 +594,64 @@ class TestPureScale4Quality(unittest.TestCase):
             shutil.rmtree(d, ignore_errors=True)
 
 
+class TestPureScale4Models(unittest.TestCase):
+    """Tests model registry integrity, scale-aware routing, and device listing."""
+
+    def test_registry_schema(self):
+        from purescale.neural.models import MODEL_REGISTRY
+
+        self.assertGreaterEqual(len(MODEL_REGISTRY), 2)
+        for key, info in MODEL_REGISTRY.items():
+            for field in ("filename", "url", "size_bytes", "scale", "task", "description"):
+                self.assertIn(field, info, f"{key} missing {field}")
+            self.assertTrue(info["url"].startswith("https://"), key)
+
+    def test_resolve_sr_model_prefers_smallest_covering_scale(self):
+        from purescale.neural.models import resolve_sr_model
+
+        fake = {
+            "sr-x2": {"task": "super-resolution", "scale": 2},
+            "sr-x4": {"task": "super-resolution", "scale": 4},
+            "det": {"task": "face-detection", "scale": 1},
+        }
+        self.assertEqual(resolve_sr_model(1.5, registry=fake), "sr-x2")
+        self.assertEqual(resolve_sr_model(2.0, registry=fake), "sr-x2")
+        self.assertEqual(resolve_sr_model(3.0, registry=fake), "sr-x4")
+        self.assertEqual(resolve_sr_model(8.0, registry=fake), "sr-x4")
+        with self.assertRaises(ValueError):
+            resolve_sr_model(2.0, registry={"det": {"task": "face-detection", "scale": 1}})
+
+    def test_cached_models_verify(self):
+        from purescale.neural.models import MODEL_REGISTRY, ModelManager
+
+        manager = ModelManager()
+        checked = 0
+        for key in MODEL_REGISTRY:
+            path = manager.get_model_path(key, auto_download=False)
+            if not path or not os.path.exists(path):
+                continue
+            checked += 1
+            self.assertTrue(manager.verify_model(key), f"{key} failed SHA256 check")
+        if checked == 0:
+            self.skipTest("No model weights downloaded locally.")
+
+    def test_list_devices(self):
+        from purescale.cli import main
+
+        self.assertEqual(main(["--list-devices"]), 0)
+        self.assertEqual(main(["--list-devices", "--json"]), 0)
+
+    def test_cuda_target_selection(self):
+        from purescale.device import has_cuda, select_providers
+        from purescale.config import DeviceTarget
+
+        providers, name = select_providers(DeviceTarget.CUDA_GPU)
+        if has_cuda():
+            self.assertIn("CUDAExecutionProvider", providers)
+        else:
+            self.assertEqual(providers, ["CPUExecutionProvider"])
+        self.assertTrue(name)
+
+
 if __name__ == "__main__":
     unittest.main()
