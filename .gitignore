@@ -1,3 +1,8 @@
+# Neural model weights (downloaded on-demand via ModelManager or tracked via Git LFS)
+models/*.onnx
+*.onnx
+*.download
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -35,9 +40,12 @@ env/
 
 # Image processing run outputs
 enhanced_output/
+enhanced/
 output/
 test_output*
 test_input*
+*.log
+*.prof
 
 # Operating System files
 .DS_Store

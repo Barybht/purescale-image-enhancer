@@ -1,0 +1,4 @@
+-r requirements.txt
+customtkinter>=5.2.0
+onnxruntime-directml>=1.16.0; sys_platform == 'win32'
+onnxruntime>=1.16.0; sys_platform != 'win32'

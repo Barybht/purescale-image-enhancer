@@ -1,186 +1,179 @@
-# PureScale Image Enhancer
+# PureScale 4.0: Autonomous Multiscale Vision & Edge AI Engine
 
 [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
-[![OpenCV](https://img.shields.io/badge/OpenCV-4.x-5C3EE8?style=flat-square&logo=opencv&logoColor=white)](https://opencv.org/)
-[![NumPy](https://img.shields.io/badge/NumPy-Array%20Ops-013243?style=flat-square&logo=numpy&logoColor=white)](https://numpy.org/)
-[![Pillow](https://img.shields.io/badge/Pillow-Imaging-90E59A?style=flat-square&logo=pypi&logoColor=black)](https://pillow.readthedocs.io/)
-[![Hardware](https://img.shields.io/badge/Hardware-Pure%20CPU-24292e?style=flat-square&logo=intel&logoColor=white)](https://github.com/)
-[![Inference](https://img.shields.io/badge/Latency-~45ms%20(4K)-success?style=flat-square)](https://github.com/)
+[![OpenCV](https://img.shields.io/badge/OpenCV-5.x-5C3EE8?style=flat-square&logo=opencv&logoColor=white)](https://opencv.org/)
+[![DirectML](https://img.shields.io/badge/DirectML-GPU%20Accelerated-0078D4?style=flat-square&logo=windows&logoColor=white)](https://github.com/microsoft/DirectML)
+[![NumPy](https://img.shields.io/badge/NumPy-Vectorized-013243?style=flat-square&logo=numpy&logoColor=white)](https://numpy.org/)
+[![Hardware](https://img.shields.io/badge/Hardware-DirectML%20GPU%20%2B%20AVX512%20CPU-24292e?style=flat-square&logo=amd&logoColor=white)](https://github.com/)
+[![Latency](https://img.shields.io/badge/Latency-~35ms%20(PureDSP)-success?style=flat-square)](https://github.com/)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
-PureScale is a high-performance image enhancement and spatial super-resolution engine implemented entirely in classical computer vision. 
-
-Eliminates neural network overhead, heavy weights downloads, and GPU requirements. Runs in milliseconds on standard CPU hardware with 100% bitwise determinism and zero hallucination risk.
+PureScale 4.0 is an autonomous, multiscale computational vision and edge neural restoration engine. It unifies physical signal diagnostics, Dark Channel Prior atmospheric dehazing, 4-octave Local Laplacian pyramid filtering, soft semantic region guidance, and lightweight edge neural super-resolution (Real-ESRGAN Compact) with hardware acceleration across AMD Radeon GPUs and Zen CPUs.
 
 ---
 
-## Core Capabilities
+## What's New in PureScale 4.0
 
-| Pipeline Stage | Algorithm / Method | Functional Purpose |
-| :--- | :--- | :--- |
-| **Spatial Scaling** | 8-Lobe Lanczos-4 Sinc Interpolation | Sharp spatial enlargement up to 8x without blurring or pixelation. |
-| **Noise Attenuation** | Space-Variant Bilateral Filtering | Eliminates sensor noise and JPEG compression grain while preserving real edges. |
-| **Dynamic Range** | CLAHE in CIE $L^\ast a^\ast b^\ast$ Color Space | Balances shadows and sky highlights locally without altering color tones. |
-| **Edge Definition** | Gaussian High-Pass Unsharp Masking | Restores micro-textures (hair, fabric, small text) with tunable detail radius. |
-| **Color Tuning** | HSV Saturation & Tristimulus Balance | Boosts color vibrancy naturally and corrects cool or warm room lighting casts. |
-| **Export Formats** | Multi-Container Serialization | Lossless PNG (alpha-preserved), JPEG (95% quality), or modern WebP (95% quality). |
+1. **Autonomous Signal Quality Diagnostics**:
+   - **Wavelet Donoho-Johnstone MAD Noise Estimator**: Measures sensor noise variance $\hat{\sigma}_{\text{noise}} = \text{median}(|HH_1|)/0.6745$ directly from 2D Haar wavelet high-frequency subbands.
+   - **Laplacian Spectral Blur Index**: Quantifies optical defocus and motion blur without reference images.
+   - **Shannon Dynamic Range Entropy**: Evaluates histogram distribution, shadow crushing, and highlight clipping.
+   - **Shades-of-Gray ($L_p$-norm) Illuminant**: Estimates illuminant cast bias (Kelvin offset).
+   - **Atmospheric Veiling Index**: Analyzes dark channel density to detect fog, haze, and smoke.
+2. **One-Click Autonomous Auto-Tuner**:
+   - Analyzes the input image signal and automatically synthesizes mathematically optimal parameters tailored specifically to its degradation characteristics.
+3. **Multiscale Local Laplacian Pyramids**:
+   - Decomposes imagery into 4 octave frequency bands ($L_0$ noise, $L_1$ micro-textures, $L_2$ structural contours, $G_3$ base illumination).
+   - Non-linear transfer functions enhance fine textures without ringing or boundary halos.
+4. **Dark Channel Prior (DCP) Atmospheric Dehazing**:
+   - Recovers true scene radiance, atmospheric depth, and color contrast using Fast Guided Filter boundary refinement.
+5. **Multi-Cue Semantic Region Guidance**:
+   - Generates soft continuous masks for Sky, Foliage, Skin, Shadow, and Architecture to spatially modulate filtering (suppressing grain in sky/shadow while boosting micro-textures in foliage).
+6. **Live Signal Diagnostics HUD in Obsidian Studio**:
+   - Real-time telemetry card displaying noise floor, blur index, entropy, and haze index with one-click Auto-Enhance.
+
+---
+
+## Three Processing Engines
+
+| Mode | Technology Stack | Hardware Target | Latency | Primary Advantage |
+| :--- | :--- | :--- | :--- | :--- |
+| **PureDSP** | EASU + Laplacian Pyramids + Dehaze + CAS + SWF + BIMEF + Oklab + CAT16 | AMD Zen 4 CPU (AVX-512) | **~35-50 ms** | 100% bitwise deterministic, zero neural weights, zero hallucination. |
+| **Neural AI** | Real-ESRGAN General x4v3 (~4.87 MB ONNX) + Laplacian Pyramids | AMD Radeon 760M (DirectML GPU) | ~350-500 ms | Deep perceptual edge synthesis and compression artifact removal. |
+| **Hybrid** | Neural Super-Resolution + Multiscale Pyramids + Pinned BIMEF + Oklab + CAS | DirectML GPU + Zen CPU | ~400-600 ms | Neural edge reconstruction with pure mathematical color science and halo-free micro-clarity. |
+
+---
+
+## Core Pipeline Stages
+
+| Stage | Algorithm / Method | Mathematical Formulation | Technical Advantage |
+| :--- | :--- | :--- | :--- |
+| **Stage -1: Diagnostics** | Wavelet MAD & Spectral Analysis | $\hat{\sigma} = \text{median}(\|HH_1\|)/0.6745$, LoG variance | Physical degradation estimation; autonomous parameter auto-tuning. |
+| **Stage -0.5: Semantics** | Multi-Cue Region Parsing | Chromatic opponent signatures + Fast Guided Filter | Soft continuous masks for Sky, Foliage, Skin, Shadow, and Structure. |
+| **Stage 0: Conditioning** | Structure Tensor Shock Deblur & Anti-Aliasing | Second directional derivative $I_{\eta\eta}$ along isophotes | Reverses optical lens diffusion and removes pixel jaggies prior to scaling. |
+| **Stage 1: Dehazing** | Dark Channel Prior (DCP) | $J(x) = (I(x) - A) / \max(t(x), t_0) + A$ with Guided Filter | Removes atmospheric fog and smoke; restores deep landscape contrast. |
+| **Stage 2: Super-Res** | EASU (DSP) or Real-ESRGAN (AI) | Directional sinc reconstruction or 6-block CNN | Vector-sharp edges up to 4x scaling with overlap patch tiling (<300 MB RAM). |
+| **Stage 3: Pyramids** | Multiscale Local Laplacian | 4-octave Gaussian/Laplacian band decomposition | Halo-free micro-texture ($L_1$) and structural contour ($L_2$) synthesis. |
+| **Stage 4: Dynamic Range** | BIMEF with Black-Point Pinning | Anchored S-curve + detail clarity gating | Seamless midtone recovery with inky blacks and zero haloing. |
+| **Stage 5: Edge Clarity** | Contrast-Adaptive Sharpening (CAS) | 3x3 local contrast min/max bound clamping | Halo-free micro-texture enhancement with zero edge overshoot. |
+| **Stage 6: Perceptual Color**| Oklab Vibrance & Bradford CAT16 | Human cone LMS cubic-root space + Von Kries transform | Straight hue lines; eliminates blue-to-purple shifts and shadow noise. |
+| **Stage 7: Portrait Retouch**| Fast Guided Filter (FGF) + YuNet | $O(N)$ subsampled local linear model + facial gating | Organic skin blemish softening preserving pores; targeted eye catchlights. |
 
 ---
 
 ## Performance Benchmark
 
-Benchmarks measured on a single commodity x86-64 CPU core (Intel Xeon / AMD EPYC @ 2.20 GHz):
+Benchmarks measured on AMD Ryzen 5 PRO 7640HS (Zen 4 AVX-512) and AMD Radeon 760M (DirectML GPU):
 
-| Input Resolution | Scaling Factor | Output Resolution | Execution Time | Peak Memory |
-| :--- | :--- | :--- | :--- | :--- |
-| $512 \times 512$ (0.26 MP) | 2.0x | $1024 \times 1024$ (1.05 MP) | ~18 ms | ~15 MB RAM |
-| $1280 \times 720$ (0.92 MP) | 2.0x | $2560 \times 1440$ (3.68 MP) | ~32 ms | ~38 MB RAM |
-| $1920 \times 1080$ (2.07 MP) | 2.0x | $3840 \times 2160$ (4K UHD) | ~45 ms | ~72 MB RAM |
-| $1920 \times 1080$ (2.07 MP) | 3.0x | $5760 \times 3240$ (6K) | ~90 ms | ~112 MB RAM |
-| $3840 \times 2160$ (8.29 MP) | 2.0x | $7680 \times 4320$ (8K UHD) | ~180 ms | ~245 MB RAM |
+| Input Resolution | Scaling Factor | Output Resolution | PureDSP Mode | Hybrid Mode | Neural AI Mode |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 512 x 512 (0.26 MP) | 2.0x | 1024 x 1024 (1.05 MP) | **~15 ms** | ~140 ms | ~120 ms |
+| 1280 x 720 (0.92 MP) | 2.0x | 2560 x 1440 (3.68 MP) | **~28 ms** | ~280 ms | ~240 ms |
+| 1920 x 1080 (2.07 MP) | 2.0x | 3840 x 2160 (4K UHD) | **~38 ms** | ~420 ms | ~360 ms |
+| 3840 x 2160 (8.29 MP) | 2.0x | 7680 x 4320 (8K UHD) | **~150 ms** | ~1,450 ms | ~1,250 ms |
 
-> [!NOTE]
-> GPU quota consumed: 0%. Operates comfortably within standard Google Colab free-tier CPU runtimes with zero warm-up latency.
-
----
-
-## Quickstart: Google Colab
-
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/)
-
-1. Open [Google Colab](https://colab.research.google.com/).
-2. Select **File** -> **Upload notebook** and choose `simple_colab_enhancer.ipynb`.
-3. Set your runtime to CPU (**Runtime** -> **Change runtime type** -> **CPU**).
-4. Configure your parameters in the interactive Form View:
-   - Size multiplier (`upscale_factor`)
-   - Edge clarity & radius (`sharpen_strength`, `sharpen_radius`)
-   - Noise cleaning (`enable_denoise`, `denoise_intensity`)
-   - Contrast & Exposure (`enable_contrast`, `contrast_boost`, `brightness_shift`)
-   - Color warmth & vibrancy (`vibrance_boost`, `color_temperature`)
-   - File format (`output_format`)
-5. Click **Run** and select an image when prompted.
-6. The enhanced image is processed in ~0.05 seconds, rendered on screen, and downloaded automatically.
+Peak RAM footprint remains strictly bounded under **65 MB** for PureDSP and under **280 MB** for Neural/Hybrid modes via overlap tiling.
+Comprehensive stage latency benchmarks are documented in [`BENCH.md`](BENCH.md).
 
 ---
 
 ## Local Usage
 
-### Installation & Dependencies
+### Installation
 
-The required packages differ depending on whether you are running the desktop GUI or the command-line interface:
+```bash
+# Clone the repository
+git clone https://github.com/Barybht/purescale-image-enhancer.git
+cd purescale-image-enhancer
 
-- **For Desktop GUI (Interactive)**:
-  Requires the core processing libraries plus `customtkinter` for the desktop interface:
-  ```bash
-  pip install opencv-python pillow numpy customtkinter
-  ```
+# Minimal CLI dependencies (OpenCV, NumPy, Pillow only)
+pip install -r requirements.txt
 
-- **For CLI / CMD (Minimal / Headless Installation)**:
-  Only requires the core processing libraries. `customtkinter` is not needed, which makes this setup ideal for headless Linux servers, Docker containers, and automated pipelines without display drivers.
-  ```bash
-  pip install opencv-python pillow numpy
-  ```
+# Full desktop GUI dependencies (CustomTkinter + DirectML GPU)
+pip install -r requirements-gui.txt
 
-#### Dependency Breakdown
+# Or install locally as a package with optional GUI support
+pip install -e .[gui]
+```
 
-| Package | CLI / CMD | Desktop GUI | Role |
-| :--- | :--- | :--- | :--- |
-| `opencv-python` | Required | Required | Core image processing: Lanczos-4 sinc scaling, bilateral denoising, CLAHE |
-| `pillow` | Required | Required | Image decoding/encoding (JPEG, WebP, PNG) and color space conversions |
-| `numpy` | Required | Required | Vectorized array operations and channel slicing |
-| `customtkinter` | Not needed | Required | Modern desktop GUI framework, themes, and UI widgets |
+### Desktop GUI (Obsidian Studio)
 
----
-
-### Option A: Desktop GUI (Interactive & Visual)
-
-Recommended for users who prefer an interactive visual interface with real-time controls, instant before/after comparison, and pan/zoom inspection.
-
-Launch the native desktop application:
-
+Launch the modern desktop application:
 ```bash
 python gui.py
 ```
+- Click **Open Image** to load an image.
+- Check the **Live Signal Diagnostics HUD** for physical signal metrics.
+- Click **Auto-Enhance (CV Engine)** for autonomous zero-click optimization.
+- Use the **Split View** slider to compare original and enhanced viewports side by side.
 
-**Key Features:**
-- **Real-Time Controls**: Sliders and toggles for scale factor, sharpen intensity, radius, bilateral denoising, adaptive contrast (CLAHE), brightness, vibrance, and white balance.
-- **Detailed Option Tooltips**: Hover over the `(?)` badge next to any setting for contextual parameter explanations.
-- **Interactive Zoom & Pan Preview**:
-  - Zoom toolbar (`-`, `+`, `Fit`, `100%`) or mouse wheel scrolling to inspect fine details up to 1500%.
-  - Click and drag anywhere on the preview canvas to pan across high-resolution images.
-  - Double-click to reset the view back to `Fit`.
-- **Before / After Comparison**: Toggle between **Enhanced** and **Original** views with a single click.
-- **Flexible Export**: Select container format (`PNG`, `JPEG`, `WebP`) with dynamic compression hints, and save via the native file dialog.
-- **Non-Blocking Execution**: Enhancement runs on a dedicated background worker thread so the interface stays responsive.
+### Command Line Interface (CLI)
 
----
-
-### Option B: Command Line Interface (CLI / CMD)
-
-Recommended for terminal users, scripting, server automation, and batch directory processing.
-
-#### 1. Single Image Enhancement
-
-Basic enhancement (default 3x upscale and balanced clarity):
-
+#### 1. Autonomous Auto-Tuning
+Analyze signal degradation and automatically enhance with optimal settings:
 ```bash
-python enhance_image.py input.jpg --scale 3
+python enhance_image.py input.jpg --auto
 ```
 
-Custom parameter tuning:
-
+#### 2. Print Physical Signal Diagnostics
+Inspect noise sigma, blur index, dynamic entropy, and haze without modifying the image:
 ```bash
-# Sharpen micro-textures with custom radius and contrast lift
-python enhance_image.py input.jpg --scale 2 --sharpen 1.4 --radius 1.8 --contrast-boost 2.5
-
-# Denoise high-ISO photo, compensate exposure, and export as JPEG
-python enhance_image.py input.jpg --denoise-intensity 70 --brightness 15 --format JPEG
-
-# Output to a specific target file
-python enhance_image.py input.jpg -o ./output/enhanced_photo.png --scale 3
+python enhance_image.py input.jpg --diagnostics
 ```
 
-#### 2. Batch Directory Processing
-
-Process an entire folder of photos with one command:
-
+#### 3. Atmospheric Dehazing & Multiscale Laplacian Detail
 ```bash
-# Enhance all images in a folder and export as modern WebP
-python enhance_image.py ./my_photos -o ./enhanced_photos --scale 2 --format WebP
+python enhance_image.py landscape.jpg --mode puredsp --dehaze 0.65 --pyramid-detail 1.35 --scale 2.0
 ```
 
----
+#### 4. Recursive Batch Directory Processing
+```bash
+python enhance_image.py path/to/photos/ -o path/to/output/ --mode hybrid --preset landscape -r
+```
 
-## Parameter Reference
+### CLI Parameters Reference
 
-| Parameter | CLI Flag | Default | Range | Plain-English Explanation |
+| Parameter | CLI Flag | Default | Valid Range | Description |
 | :--- | :--- | :--- | :--- | :--- |
-| `upscale_factor` | `--scale` | 3 | 1.0 - 8.0 | **Size Multiplier**: 1 preserves original size; 2 doubles dimensions; 3 triples resolution. |
-| `sharpen_strength` | `--sharpen` | 1.2 | 0.0 - 3.0 | **Edge Sharpness**: 0 is disabled; 1.0-1.4 provides natural clarity; 2.0+ is very crisp. |
-| `sharpen_radius` | `--radius` | 2.5 | 1.0 - 6.0 | **Detail Size**: 1.0-2.0 targets fine hair, fabric weave, and text; 3.0-5.0 targets broad contours. |
-| `enable_denoise` | `--no-denoise` | True | Boolean | **Noise Cleaner Toggle**: Enables edge-preserving bilateral filtering to strip grain. |
-| `denoise_intensity`| `--denoise-intensity` | 50 | 10 - 100 | **Cleaning Power**: 20-40 keeps film grain; 50-60 is balanced; 80+ smooths rough scans. |
-| `enable_contrast` | `--no-contrast` | True | Boolean | **Adaptive Contrast (HDR)**: Locally balances shadows and bright skies without color shift. |
-| `contrast_boost` | `--contrast-boost` | 2.0 | 1.0 - 4.0 | **Shadow/Highlight Lift**: 1.0-1.5 is gentle; 2.0 is balanced; 3.0+ delivers punchy contrast. |
-| `brightness_shift` | `--brightness` | 0 | -50 to +50 | **Exposure Adjustment**: Negative values dim bright images; positive values brighten dark shots. |
-| `vibrance_boost` | `--vibrance` | 1.1 | 1.0 - 1.5 | **Color Freshness**: 1.0 is original; 1.1 adds a natural 10% saturation lift without skin distortion. |
-| `color_temperature`| `--temperature` | 0 | -30 to +30 | **White Balance**: Negative values add cool daylight blue; positive values add golden sun warmth. |
-| `output_format` | `--format` | PNG | PNG, JPEG, WebP | **Container Format**: Lossless PNG (supports alpha), compact JPEG (95%), or WebP (95%). |
+| `auto_tune` | `--auto` | False | Boolean | **Autonomous Auto-Tuning**: Automatically configures parameters based on diagnostics. |
+| `diagnostics` | `--diagnostics` | False | Boolean | **Signal Diagnostics**: Prints formatted ASCII telemetry table without processing. |
+| `mode` | `--mode` | `puredsp` | `puredsp`, `neural`, `hybrid` | **Execution Engine**: Analytical DSP, Neural AI, or Hybrid mode. |
+| `device` | `--device` | `auto` | `auto`, `directml`, `cpu`, `opencv` | **Hardware Accelerator**: DirectML GPU, CPU SIMD, or OpenCV DNN fallback. |
+| `preset` | `-p`, `--preset` | None | `balanced`, `portrait`, `landscape`, `low-light`, `art` | **Parameter Profile**: Loads pre-tuned empirical parameter profiles. |
+| `dehaze` | `--dehaze` | 0.0 | 0.0 - 1.0 | **Atmospheric Dehaze**: Dark Channel Prior (DCP) fog/haze removal strength. |
+| `pyramid_detail` | `--pyramid-detail` | 1.20 | 0.5 - 2.0 | **Micro-Texture Gain**: Multiscale Local Laplacian octave band L1 detail boost. |
+| `pyramid_structure`| `--pyramid-structure`| 1.10 | 0.8 - 1.8 | **Structural Gain**: Multiscale Local Laplacian octave band L2 contour boost. |
+| `scale` | `--scale` | 2.0 | 0.5 - 4.0 | **Spatial Magnification**: Resolution scaling factor (0.5x to 4.0x). |
+| `sharpen_strength` | `--sharpen` | 1.1 | 0.0 - 3.0 | **Detail Clarity**: Contrast-Adaptive Sharpening (CAS) halo-free gain. |
+| `denoise_intensity`| `--denoise-intensity` | 40 | 10 - 100 | **Cleaning Power**: Side Window Filter (SWF) noise attenuation strength. |
+| `contrast_boost` | `--contrast-boost` | 1.8 | 1.0 - 4.0 | **HDR Dynamic Range**: BIMEF exposure fusion tone curve factor. |
+| `brightness` | `--brightness` | 0 | -50 to +50 | **Radiometric Exposure**: Additive brightness shift offset. |
+| `vibrance` | `--vibrance` | 1.10 | 1.0 - 1.5 | **Perceptual Vibrance**: Color saturation multiplier in Oklab LMS cone space. |
+| `temperature` | `--temperature` | 0 | -30 to +30 | **White Balance**: Bradford CAT16 chromatic adaptation offset. |
+| `depixel` | `--depixel` | 0 | 0 - 100 | **Anti-Aliasing**: Directional subpixel de-pixelation & deblocking strength. |
+| `deblur` | `--deblur` | 0 | 0 - 100 | **Shock Deblur**: Structure tensor morphological shock deblur strength. |
+| `portrait_smooth` | `--portrait-smooth` | 35 | 0 - 100 | **Skin Softening**: Fast Guided Filter (FGF) skin smoothing intensity. |
+| `eye_clarity` | `--eye-clarity` | 1.30 | 1.0 - 2.0 | **Eye Clarity**: Corneal catchlight and iris sharpness. |
+| `tile_size` | `--tile-size` | 256 | >= 32 | **Neural Patch Dimension**: Spatial tile dimension for neural inference. |
+| `tile_overlap` | `--tile-overlap` | 32 | 0 <= overlap < tile | **Patch Overlap**: Border overlap margin with raised-cosine feathering. |
+| `max_megapixels` | `--max-megapixels` | 40.0 | > 0.0 | **Memory OOM Guard**: Maximum allowed megapixels (input/target) before aborting. |
+| `recursive` | `-r`, `--recursive` | False | Boolean | **Recursive Processing**: Recursively process subdirectories in batch mode. |
+| `no_pyramid` | `--no-pyramid` | False | Boolean | **Bypass Flag**: Disables Multiscale Local Laplacian Pyramid filtering. |
+| `no_semantic` | `--no-semantic` | False | Boolean | **Bypass Flag**: Disables multi-cue semantic region parsing. |
+| `no_denoise` | `--no-denoise` | False | Boolean | **Bypass Flag**: Disables Side Window Filter (SWF) denoising. |
+| `no_contrast` | `--no-contrast` | False | Boolean | **Bypass Flag**: Disables BIMEF dynamic range fusion. |
+| `format` | `--format` | PNG | PNG, JPEG, WebP | **Container Format**: Lossless PNG (alpha supported), JPEG (95%), or WebP (95%). |
+
 
 ---
 
-## Architecture & Technical Deep Dive
+## Technical Documentation
 
-For an in-depth breakdown of the signal processing theory, algorithmic proofs, and empirical analysis, refer to [`ARCHITECTURE.md`](ARCHITECTURE.md):
-
-- **Mathematical Foundations**: Continuous 8-lobe Lanczos-4 sinc reconstruction and space-variant bilateral filtering formulas.
-- **Color Space Processing**: Orthogonal CIE $L^\ast a^\ast b^\ast$ decomposition and localized CLAHE dynamic range optimization.
-- **Complexity Analysis**: Asymptotic runtime bounds ($O(N)$ / $O(s^2 N)$) and SIMD cache-friendly access patterns.
-- **Empirical Benchmarks**: Detailed latency, throughput, and hardware comparisons against deep neural models (Real-ESRGAN, Diffusion).
+For complete mathematical derivations, signal processing proofs, and algorithmic formulations, consult [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ---
 
 ## License
 
-This project is open-source software licensed under the **[MIT License](LICENSE)**.
+PureScale 4.0 is open-source software licensed under the **[MIT License](LICENSE)**.
