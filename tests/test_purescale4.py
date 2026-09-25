@@ -6,7 +6,19 @@ import sys
 import unittest
 import numpy as np
 import cv2
-import tkinter as tk
+
+try:
+    import tkinter as tk
+    _TK_AVAILABLE = True
+except ImportError:
+    tk = None  # type: ignore[assignment]
+    _TK_AVAILABLE = False
+
+
+def _is_display_error(err: BaseException) -> bool:
+    """True for missing-display failures (skipped) as opposed to real bugs."""
+    msg = str(err).lower()
+    return "no display" in msg or "display name" in msg or "$display" in msg
 
 from purescale.config import (
     DeviceTarget,
@@ -340,6 +352,12 @@ class TestPureScale4CliAndGui(unittest.TestCase):
         self.assertTrue(os.path.exists(self.temp_out))
 
     def test_headless_gui(self):
+        if not _TK_AVAILABLE:
+            self.skipTest("tkinter not available on this runner")
+        try:
+            import customtkinter  # noqa: F401
+        except ImportError as e:
+            self.skipTest(f"GUI dependencies not installed: {e}")
         from purescale.gui.app import PureScaleApp
         try:
             app = PureScaleApp()
@@ -357,9 +375,9 @@ class TestPureScale4CliAndGui(unittest.TestCase):
             app._apply_diagnostics_to_ui(diag)
 
             app.destroy()
-        except (tk.TclError, RuntimeError, OSError) as e:
+        except Exception as e:
             # If no display available in CI environment, skip cleanly
-            if "no display" in str(e).lower() or "display name" in str(e).lower():
+            if _is_display_error(e):
                 self.skipTest(f"Headless display not available: {e}")
             else:
                 raise e
@@ -369,7 +387,7 @@ class TestPureScale4GuiScrolling(unittest.TestCase):
     """Tests kinetic sidebar scrolling math (display-free) and routing."""
 
     def test_wheel_pixels(self):
-        from purescale.gui.scrolling import wheel_pixels
+        from purescale.gui.scroll_math import wheel_pixels
 
         self.assertEqual(wheel_pixels(-120, 0, 56), 56)   # one notch down
         self.assertEqual(wheel_pixels(120, 0, 56), -56)   # one notch up
@@ -379,7 +397,7 @@ class TestPureScale4GuiScrolling(unittest.TestCase):
         self.assertEqual(wheel_pixels(0, 0, 56), 0)       # no input, no motion
 
     def test_clamp_fraction(self):
-        from purescale.gui.scrolling import clamp_fraction
+        from purescale.gui.scroll_math import clamp_fraction
 
         self.assertEqual(clamp_fraction(0.5, 0.4), 0.5)
         self.assertEqual(clamp_fraction(-0.2, 0.4), 0.0)
@@ -387,6 +405,12 @@ class TestPureScale4GuiScrolling(unittest.TestCase):
         self.assertEqual(clamp_fraction(0.3, 1.0), 0.0)   # fits entirely
 
     def test_sidebar_smooth_scroll_routing(self):
+        if not _TK_AVAILABLE:
+            self.skipTest("tkinter not available on this runner")
+        try:
+            import customtkinter  # noqa: F401
+        except ImportError as e:
+            self.skipTest(f"GUI dependencies not installed: {e}")
         from purescale.gui.app import PureScaleApp
         from purescale.gui.scrolling import SmoothScrollableFrame
         try:
@@ -417,8 +441,8 @@ class TestPureScale4GuiScrolling(unittest.TestCase):
             self.assertEqual(before, after)
 
             app.destroy()
-        except (tk.TclError, RuntimeError, OSError) as e:
-            if "no display" in str(e).lower() or "display name" in str(e).lower():
+        except Exception as e:
+            if _is_display_error(e):
                 self.skipTest(f"Headless display not available: {e}")
             else:
                 raise e

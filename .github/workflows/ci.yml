@@ -31,8 +31,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install onnxruntime pytest
+          pip install -r requirements-gui.txt
+          pip install pytest
 
       - name: Verify zero non-ASCII emojis and code integrity
         run: |
