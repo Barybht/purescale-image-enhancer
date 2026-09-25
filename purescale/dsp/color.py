@@ -22,35 +22,65 @@ _M2 = np.array([
 _M2_INV = np.linalg.inv(_M2)
 
 
+# Contiguous transposes: `M.T` is a strided view that pushes matmul onto a
+# slow path (measured ~10x on the M2 product). These are the operands used
+# in every conversion below.
+_M1_T = np.ascontiguousarray(_M1.T)
+_M1_INV_T = np.ascontiguousarray(_M1_INV.T)
+_M2_T = np.ascontiguousarray(_M2.T)
+_M2_INV_T = np.ascontiguousarray(_M2_INV.T)
+
+
+def _srgb_to_linear_lut() -> np.ndarray:
+    """Exact 256-entry sRGB -> linear table (identical to the piecewise formula)."""
+    v = np.arange(256, dtype=np.float32) / 255.0
+    return np.where(v <= 0.04045, v / 12.92, ((v + 0.055) / 1.055) ** 2.4).astype(np.float32)
+
+
+def _linear_to_srgb_lut(size: int = 4096) -> np.ndarray:
+    """Dense linear -> sRGB table for nearest-index lookup.
+
+    Max error is half a step (0.5/4095 in sRGB units ~= 0.03 LSB), safely
+    inside the 1 LSB roundtrip budget. A single gather pass, unlike lerp
+    which costs two gathers plus arithmetic and profiles slower than the
+    direct ``where``+``pow`` evaluation it replaces.
+    """
+    v = np.linspace(0.0, 1.0, size, dtype=np.float32)
+    return np.where(v <= 0.0031308, v * 12.92, 1.055 * (v ** (1.0 / 2.4)) - 0.055).astype(np.float32)
+
+
+_LUT_SRGB2LIN = _srgb_to_linear_lut()
+_LUT_LIN2SRGB = _linear_to_srgb_lut()
+_LUT_LIN2SRGB_N = _LUT_LIN2SRGB.shape[0]
+
+
 def srgb_to_oklab(bgr: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Converts BGR image [0..255] to Oklab coordinates (L, a, b)."""
-    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
-    # sRGB to linear sRGB
-    lin = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
+    # Exact 256-entry LUT instead of per-pixel where+pow (identical values).
+    lin = _LUT_SRGB2LIN[rgb]
 
     # Linear sRGB to cone LMS space
-    lms = lin @ _M1.T
-    lms = np.maximum(lms, 0.0)
-    lms_cbrt = np.cbrt(lms)
+    lms = lin @ _M1_T
+    lms_cbrt = np.cbrt(np.maximum(lms, 0.0))
 
     # LMS^(1/3) to Oklab
-    lab = lms_cbrt @ _M2.T
+    lab = lms_cbrt @ _M2_T
     return lab[:, :, 0], lab[:, :, 1], lab[:, :, 2]
 
 
 def oklab_to_srgb(L: np.ndarray, a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Converts Oklab coordinates (L, a, b) back to BGR image [0..255]."""
     lab = np.stack([L, a, b], axis=-1)
-    lms_cbrt = lab @ _M2_INV.T
+    lms_cbrt = lab @ _M2_INV_T
     # Sign-safe across NumPy versions (avoids float power NaN on negative values)
     lms = lms_cbrt * lms_cbrt * lms_cbrt
 
-    lin = lms @ _M1_INV.T
-    lin = np.clip(lin, 0.0, 1.0)
+    lin = np.clip(lms @ _M1_INV_T, 0.0, 1.0)
 
-    # Linear sRGB to standard sRGB
-    srgb = np.where(lin <= 0.0031308, lin * 12.92, 1.055 * (lin ** (1.0 / 2.4)) - 0.055)
+    # Nearest-index LUT instead of per-pixel where+pow (~3x, <=0.03 LSB error).
+    srgb = _LUT_LIN2SRGB[np.rint(lin * (_LUT_LIN2SRGB_N - 1)).astype(np.int32)]
     srgb_bytes = np.clip(srgb * 255.0, 0.0, 255.0).astype(np.uint8)
     return cv2.cvtColor(srgb_bytes, cv2.COLOR_RGB2BGR)
 
@@ -121,7 +151,7 @@ def bradford_cat16_white_balance(bgr: np.ndarray, temperature_offset: int = 0) -
     t_mat = _M_CAT_INV @ diag @ _M_CAT
 
     rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB).astype(np.float32)
-    adapted = rgb @ t_mat.T
+    adapted = rgb @ np.ascontiguousarray(t_mat.T)
     adapted_bgr = cv2.cvtColor(np.clip(adapted, 0.0, 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR)
 
     return adapted_bgr

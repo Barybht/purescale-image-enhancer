@@ -264,6 +264,13 @@ class TestPureScale4Pipeline(unittest.TestCase):
         max_diff = np.max(np.abs(test_pixels.astype(np.int32) - reconstructed.astype(np.int32)))
         self.assertLessEqual(max_diff, 1, "Oklab roundtrip must be within 1 LSB rounding")
 
+        # LUT fast paths must hold the same bound on dense random data.
+        rng = np.random.default_rng(7)
+        field = rng.integers(0, 256, (64, 64, 3)).astype(np.uint8)
+        L, a, b = srgb_to_oklab(field)
+        rec = oklab_to_srgb(L, a, b)
+        self.assertLessEqual(int(np.max(np.abs(field.astype(np.int32) - rec.astype(np.int32)))), 1)
+
     def test_tiling_smooth_cosine_partition_of_unity(self):
         from purescale.neural.tiling import tile_process
         y, x = np.mgrid[0:256, 0:256]
