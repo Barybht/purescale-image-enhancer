@@ -160,6 +160,39 @@ class TestPureScale4SemanticAndDehaze(unittest.TestCase):
         self.assertTrue(np.all(trans >= 0.09))
 
 
+class TestPureScale4SideWindowFilter(unittest.TestCase):
+    """Tests luminance-selection SWF: determinism, denoising, edge preservation."""
+
+    def test_swf_determinism_and_denoising(self):
+        from purescale.dsp.filters import side_window_filter
+
+        rng = np.random.default_rng(11)
+        img = np.full((200, 300, 3), 128.0)
+        img[:, 150:] = 200.0
+        img += rng.normal(0, 12.0, img.shape)
+        img = np.clip(img, 0, 255).astype(np.uint8)
+
+        out1 = side_window_filter(img, radius=2, iterations=1)
+        out2 = side_window_filter(img, radius=2, iterations=1)
+        self.assertTrue(np.array_equal(out1, out2))
+        self.assertEqual(out1.shape, img.shape)
+        self.assertEqual(out1.dtype, np.uint8)
+
+        flat_in = img[20:180, 20:130].astype(np.float32).std()
+        flat_out = out1[20:180, 20:130].astype(np.float32).std()
+        self.assertLess(flat_out, flat_in * 0.5)
+
+        edge = out1[20:180, 140:160].mean(axis=(0, 2))
+        self.assertGreater(float(edge[-1] - edge[0]), 60.0)
+
+    def test_swf_clean_skip(self):
+        from purescale.dsp.filters import side_window_filter
+
+        clean = np.full((64, 64, 3), 128, dtype=np.uint8)
+        out = side_window_filter(clean, radius=2, iterations=1, noise_sigma=0.5)
+        self.assertTrue(np.array_equal(out, clean))
+
+
 class TestPureScale4Pipeline(unittest.TestCase):
     """Test suite for end-to-end PureScale 4.0 Pipeline determinism."""
 

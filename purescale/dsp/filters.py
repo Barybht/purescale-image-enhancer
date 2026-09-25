@@ -41,6 +41,11 @@ def side_window_filter(img: np.ndarray, radius: int = 2, iterations: int = 1,
     h, w, c = cur.shape
     r = radius
 
+    # Window selection runs on Rec.709 luminance (consistent with BIMEF):
+    # 1 plane instead of 3, ~17% fewer filtered pixels per window plus
+    # cheaper argmin traffic. Per-channel means are still used for output.
+    gray = (0.0722 * cur[:, :, 0] + 0.7152 * cur[:, :, 1] + 0.2126 * cur[:, :, 2])
+
     # 8 directional window slices relative to center (0,0)
     # Each window bounds: (row_start, row_end, col_start, col_end)
     windows = [
@@ -56,9 +61,10 @@ def side_window_filter(img: np.ndarray, radius: int = 2, iterations: int = 1,
 
     for _ in range(iterations):
         padded = cv2.copyMakeBorder(cur, r, r, r, r, cv2.BORDER_REFLECT)
-        sq_padded = padded * padded
+        gray_padded = cv2.copyMakeBorder(gray, r, r, r, r, cv2.BORDER_REFLECT)
+        gray_sq = gray_padded * gray_padded
 
-        best_diff = np.full((h, w, c), 1e9, dtype=np.float32)
+        best_score = np.full((h, w, 1), 1e9, dtype=np.float32)
         best_mean = cur.copy()
 
         for r1, r2, c1, c2 in windows:
@@ -71,20 +77,23 @@ def side_window_filter(img: np.ndarray, radius: int = 2, iterations: int = 1,
             p_c2 = p_c1 + w + kw - 1
 
             sub_p = padded[p_r1 : p_r2 + 1, p_c1 : p_c2 + 1]
-            sub_sq = sq_padded[p_r1 : p_r2 + 1, p_c1 : p_c2 + 1]
+            sub_g = gray_padded[p_r1 : p_r2 + 1, p_c1 : p_c2 + 1]
+            sub_gsq = gray_sq[p_r1 : p_r2 + 1, p_c1 : p_c2 + 1]
 
             mean = cv2.boxFilter(sub_p, cv2.CV_32F, (kw, kh))[:h, :w]
-            sq_mean = cv2.boxFilter(sub_sq, cv2.CV_32F, (kw, kh))[:h, :w]
-            var = np.maximum(0.0, sq_mean - mean * mean)
+            g_mean = cv2.boxFilter(sub_g, cv2.CV_32F, (kw, kh))[:h, :w]
+            g_sq_mean = cv2.boxFilter(sub_gsq, cv2.CV_32F, (kw, kh))[:h, :w]
+            g_var = np.maximum(0.0, g_sq_mean - g_mean * g_mean)
 
-            total_var = np.sum(var, axis=2, keepdims=True)
-            diff = np.abs(mean - cur) + 0.1 * total_var
+            score = np.abs(g_mean - gray) + 0.1 * g_var
+            score = score[:, :, np.newaxis]
 
-            mask = diff < best_diff
-            best_diff = np.where(mask, diff, best_diff)
+            mask = score < best_score
+            best_score = np.where(mask, score, best_score)
             best_mean = np.where(mask, mean, best_mean)
 
         cur = best_mean
+        gray = (0.0722 * cur[:, :, 0] + 0.7152 * cur[:, :, 1] + 0.2126 * cur[:, :, 2])
 
     return np.clip(cur, 0.0, 255.0).astype(np.uint8)
 
