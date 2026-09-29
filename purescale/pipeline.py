@@ -339,8 +339,10 @@ class PureScalePipeline:
         active_backend = f"{cpu_label()} (DSP)"
 
         cur = img.copy()
-        is_grayscale = (cur.ndim == 2)
+        is_grayscale = (cur.ndim == 2) or (cur.ndim == 3 and cur.shape[2] == 1)
         if is_grayscale:
+            if cur.ndim == 3:
+                cur = cur[:, :, 0]
             cur = cv2.cvtColor(cur, cv2.COLOR_GRAY2BGR)
         elif cur.ndim == 3 and cur.shape[2] == 4:
             if alpha is None:

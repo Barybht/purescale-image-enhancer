@@ -420,6 +420,66 @@ class TestPureScale4Pipeline(unittest.TestCase):
         self.assertIsNotNone(res_bgra.alpha)
         self.assertEqual(res_bgra.alpha.shape, (90, 90))
 
+    def test_manga_preset_halftone_preservation(self):
+        from purescale.config import get_preset_config
+
+        h, w = 120, 120
+        ht = np.full((h, w), 250, dtype=np.uint8)
+        dot_pitch = 4
+        dot_radius = 1
+        for y in range(4, h // 2, dot_pitch):
+            for x in range(4, w - 4, dot_pitch):
+                cv2.circle(ht, (x, y), dot_radius, 40, -1)
+        cv2.line(ht, (0, h // 2), (w, h // 2), 10, thickness=2)
+        ht[h // 2 + 10:h - 10, w // 2:w - 10] = 10
+
+        rng = np.random.default_rng(42)
+        ht_noisy = np.clip(ht.astype(np.float32) + rng.normal(0, 3.5, ht.shape), 0, 255).astype(np.uint8)
+
+        pipeline = PureScalePipeline()
+
+        # Manga preset (DSP)
+        cfg_manga = get_preset_config("manga")
+        cfg_manga.mode = ProcessingMode.PURE_DSP
+        cfg_manga.scale = 1.0
+        out_manga = pipeline.enhance(ht_noisy, config=cfg_manga).image
+
+        # Balanced preset (DSP)
+        cfg_bal = get_preset_config("balanced")
+        cfg_bal.mode = ProcessingMode.PURE_DSP
+        cfg_bal.scale = 1.0
+        out_bal = pipeline.enhance(ht_noisy, config=cfg_bal).image
+
+        region_slice = (slice(4, 56), slice(4, 116))
+        var_in = float(np.var(ht_noisy[region_slice].astype(np.float32)))
+        var_manga = float(np.var(out_manga[region_slice].astype(np.float32)))
+        var_bal = float(np.var(out_bal[region_slice].astype(np.float32)))
+
+        manga_retention = var_manga / var_in
+        self.assertGreater(manga_retention, 0.85, f"Manga preset smoothed screentone: {manga_retention:.1%}")
+
+        bal_retention = var_bal / var_in
+        self.assertLess(bal_retention, 0.35, f"Balanced preset did not smooth noise: {bal_retention:.1%}")
+
+    def test_anime_style_grayscale_handling(self):
+        pipeline = PureScalePipeline()
+        for mode in (ProcessingMode.NEURAL_AI, ProcessingMode.HYBRID):
+            cfg = PipelineConfig(mode=mode, scale=2.0, sr_style="anime")
+
+            # 2D Grayscale [H, W]
+            gray_2d = np.full((64, 64), 200, dtype=np.uint8)
+            cv2.line(gray_2d, (10, 10), (54, 54), 20, thickness=2)
+            res_2d = pipeline.enhance(gray_2d, config=cfg)
+            self.assertEqual(res_2d.image.ndim, 2, f"Expected 2D image for mode {mode}")
+            self.assertEqual(res_2d.image.shape, (128, 128))
+            self.assertEqual(res_2d.image.dtype, np.uint8)
+
+            # 3D 1-channel [H, W, 1]
+            gray_3d = gray_2d[:, :, np.newaxis]
+            res_3d = pipeline.enhance(gray_3d, config=cfg)
+            self.assertEqual(res_3d.image.ndim, 2)
+            self.assertEqual(res_3d.image.shape, (128, 128))
+
     def test_oklab_srgb_roundtrip(self):
         from purescale.dsp.color import srgb_to_oklab, oklab_to_srgb
         test_pixels = np.array([
@@ -539,6 +599,11 @@ class TestPureScale4CliAndGui(unittest.TestCase):
 
             app._on_preset_change("Art")
             self.assertEqual(app.style_seg.get(), "Anime")
+
+            app._on_preset_change("Manga")
+            self.assertFalse(app.denoise_switch.get())
+            self.assertEqual(app.style_seg.get(), "Anime")
+            self.assertAlmostEqual(app.cas_slider.get(), 0.7)
 
             app._on_preset_change("Fast")
             self.assertTrue(app.fast_2x_switch.get())

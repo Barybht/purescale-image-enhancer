@@ -176,7 +176,7 @@ remains the zero-dependency fallback.
 | `mode` | `--mode` | `puredsp` | `puredsp`, `neural`, `hybrid` | **Execution Engine**: Analytical DSP, Neural AI, or Hybrid mode. |
 | `device` | `--device` | `auto` | `auto`, `directml`, `cuda`, `cpu`, `opencv` | **Hardware Accelerator**: CUDA > DirectML > CPU auto-select, or forced backend (OpenCV DNN needs zero extra deps). |
 | `sr_style` | `--style` | `photo` | `photo`, `anime` | **Super-Resolution Style**: Model style selection (`photo` for general images, `anime` for illustrations). |
-| `preset` | `-p`, `--preset` | None | `balanced`, `portrait`, `landscape`, `low-light`, `art`, `fast` | **Parameter Profile**: Loads pre-tuned empirical parameter profiles (`fast` skips heavy stages; `art` uses anime style). |
+| `preset` | `-p`, `--preset` | None | `balanced`, `portrait`, `landscape`, `low-light`, `art`, `manga`, `fast` | **Parameter Profile**: Loads pre-tuned empirical parameter profiles (`manga` preserves halftone screentones with denoise off; `art` uses anime style; `fast` skips heavy stages). |
 | `dehaze` | `--dehaze` | 0.0 | 0.0 - 1.0 | **Atmospheric Dehaze**: Dark Channel Prior (DCP) fog/haze removal strength. |
 | `pyramid_detail` | `--pyramid-detail` | 1.20 | 0.5 - 2.0 | **Micro-Texture Gain**: Multiscale Local Laplacian octave band L1 detail boost. |
 | `pyramid_structure`| `--pyramid-structure`| 1.10 | 0.8 - 1.8 | **Structural Gain**: Multiscale Local Laplacian octave band L2 contour boost. |
