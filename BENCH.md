@@ -86,6 +86,22 @@ SWF stage ~2.0x (244 ms → 122 ms on a 640x480 noisy fixture),
 Oklab vibrance ~1.5x (155 ms → 106 ms on a 960x640 fixture),
 dehaze ~1.9x (408 ms → 218 ms at 1080p, strength 0.65).
 
+### Post-Optimization: SWF proxy denoising (Phase 2c)
+
+Large images (long edge > 480 px) are denoised on an INTER_AREA
+downsampled proxy and upsampled with INTER_LINEAR
+(`side_window_filter(..., proxy_max_dim=480)`; `0` restores the
+full-resolution path). Small fixtures (all golden/unit inputs) take the
+identical full path, so golden outputs are bitwise unchanged.
+
+- **Speedup**: ~1.7x on 640x480 (74.7 ms → 43.1 ms), ~7x at 720p
+  (234 ms → 33 ms), ~12x at 1080p (453 ms → 37 ms), radius 2.
+- **Quality gates** (`test_swf_proxy_consistency`, mirroring the dehaze
+  proxy test): PSNR > 35 dB vs full path, SSIM > 0.90 (lower than
+  dehaze's 0.98 because two valid denoises differ in residual grain,
+  not structure), flat-region noise still halved, step-edge delta
+  preserved (> 60), deterministic across runs.
+
 ---
 
 ## Architectural Insights & Optimizations

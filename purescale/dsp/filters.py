@@ -6,7 +6,8 @@ from typing import Optional
 
 
 def side_window_filter(img: np.ndarray, radius: int = 2, iterations: int = 1,
-                        noise_sigma: Optional[float] = None) -> np.ndarray:
+                        noise_sigma: Optional[float] = None,
+                        proxy_max_dim: int = 480) -> np.ndarray:
     """
     Side Window Filter (SWF) for edge- and corner-preserving denoising.
     Decomposes the kernel into 8 directional half-windows (L, R, U, D, NW, NE, SW, SE)
@@ -16,6 +17,12 @@ def side_window_filter(img: np.ndarray, radius: int = 2, iterations: int = 1,
     Early exits (bitwise-identical copy, ~1ms instead of ~75-1000ms):
     - ``noise_sigma < 2.0`` (diagnosed Clean) with default strength skips entirely.
     - Near-uniform images (downsampled gray std < 0.75) skip entirely.
+
+    Large images (long edge above ``proxy_max_dim``) are denoised on a
+    downsampled INTER_AREA proxy and upsampled with INTER_LINEAR (~7-12x
+    faster at 720p/1080p; proxy denoises more aggressively while preserving
+    step edges). Set ``proxy_max_dim=0`` to always run the full-resolution
+    path.
     """
     if radius <= 0 or iterations <= 0:
         return img.copy()
@@ -36,6 +43,23 @@ def side_window_filter(img: np.ndarray, radius: int = 2, iterations: int = 1,
             return img.copy()
     except (cv2.error, ValueError):
         pass
+
+    # Large-image proxy: denoise downsampled, upsample result. Placed after
+    # the early exits so clean/uniform images still return bitwise copies.
+    # Kernel radius scales with proxy scale to keep physical size constant.
+    if proxy_max_dim > 0:
+        h_full, w_full = img.shape[:2]
+        if max(h_full, w_full) > proxy_max_dim:
+            pscale = proxy_max_dim / float(max(h_full, w_full))
+            small = cv2.resize(img, (0, 0), fx=pscale, fy=pscale,
+                               interpolation=cv2.INTER_AREA)
+            proxy_radius = max(1, int(round(radius * pscale)))
+            denoised_small = side_window_filter(
+                small, radius=proxy_radius, iterations=iterations,
+                noise_sigma=noise_sigma, proxy_max_dim=0,
+            )
+            return cv2.resize(denoised_small, (w_full, h_full),
+                              interpolation=cv2.INTER_LINEAR)
 
     cur = img.astype(np.float32)
     h, w, c = cur.shape

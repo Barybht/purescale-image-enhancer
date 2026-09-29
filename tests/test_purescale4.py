@@ -231,6 +231,36 @@ class TestPureScale4SideWindowFilter(unittest.TestCase):
         out = side_window_filter(clean, radius=2, iterations=1, noise_sigma=0.5)
         self.assertTrue(np.array_equal(out, clean))
 
+    def test_swf_proxy_consistency(self):
+        # Proxy path must stay near-identical to the full-res path while
+        # still removing noise and preserving step edges, deterministically.
+        # SSIM bar is lower than dehaze's 0.98: two valid denoises differ in
+        # residual grain texture (proxy smooths more), not structure.
+        from purescale.dsp.filters import side_window_filter
+        from purescale.quality import compare_images
+
+        rng = np.random.default_rng(11)
+        img = np.full((360, 640, 3), 128.0)
+        img[:, 320:] = 200.0
+        img += rng.normal(0, 12.0, img.shape)
+        img = np.clip(img, 0, 255).astype(np.uint8)
+
+        full = side_window_filter(img, radius=2, iterations=1, proxy_max_dim=0)
+        proxy = side_window_filter(img, radius=2, iterations=1, proxy_max_dim=480)
+        metrics = compare_images(full, proxy)
+        self.assertGreater(metrics["psnr_db"], 35.0)
+        self.assertGreater(metrics["ssim"], 0.90)
+
+        flat_in = img[40:300, 40:260].astype(np.float32).std()
+        flat_out = proxy[40:300, 40:260].astype(np.float32).std()
+        self.assertLess(flat_out, flat_in * 0.5)
+
+        edge = proxy[40:300, 300:340].mean(axis=(0, 2))
+        self.assertGreater(float(edge[-1] - edge[0]), 60.0)
+
+        again = side_window_filter(img, radius=2, iterations=1, proxy_max_dim=480)
+        self.assertTrue(np.array_equal(proxy, again))
+
 
 class TestPureScale4Pipeline(unittest.TestCase):
     """Test suite for end-to-end PureScale 4.0 Pipeline determinism."""
