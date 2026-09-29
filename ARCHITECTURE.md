@@ -300,8 +300,11 @@ Content-aware routing (`--auto-style`, implied by `--auto`) classifies the
 input before the profile step from three 160px-proxy signals: mean HSV
 saturation, quantized unique-color fraction, and high-pass residual energy
 ratio. Near-zero saturation with strong fine-periodic energy routes to
-manga; few distinct colors with ink-edge energy and real color routes to
-anime; everything else stays photo. Re-routing needs confidence >= 0.60
+manga (B&W halftones), as does dot-scale energy above 0.75 regardless of
+color (color halftones; noisy photos peak near 0.48 and stay photo);
+few distinct colors with genuine ink-edge energy — a 0.20 residual floor
+rejects clean/blurred gradients whose smoothness mimics flat color — and
+real color routes to anime; everything else stays photo. Re-routing needs confidence >= 0.60
 and never overrides an explicit `--style`; manga content sets the DSP
 profile only, since no manga weights exist. Cost is ~0.3 ms (VGA) to
 ~1.5 ms (1080p).

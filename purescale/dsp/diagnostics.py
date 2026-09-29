@@ -286,13 +286,19 @@ def classify_content_style(img_bgr: np.ndarray) -> Tuple[str, float]:
 
     Decision order (first match wins):
     - manga: near-zero saturation with strong fine-periodic energy
-      (halftone screentones). B&W photos fail the energy gate.
-    - anime: very few distinct colors with ink-edge energy and real color.
+      (B&W halftone screentones), or dot-scale energy above 0.75
+      regardless of color (color halftones). B&W photos fail the
+      energy gate; noisy photos fail it too (resid ~0.48).
+    - anime: very few distinct colors with genuine ink-edge energy (a
+      0.20 residual floor rejects clean/blurred gradients, whose
+      smoothness would otherwise mimic flat color) and real color.
     - photo: fallback for natural imagery.
 
     Returns:
         Tuple of (style, confidence in [0.0, 1.0]).
     """
+    if img_bgr.ndim == 2:
+        img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_GRAY2BGR)
     h, w = img_bgr.shape[:2]
     scale = min(1.0, 160.0 / max(h, w))
     if scale < 1.0:
@@ -315,10 +321,15 @@ def classify_content_style(img_bgr: np.ndarray) -> Tuple[str, float]:
         m2 = min((0.05 - sat) / 0.05, 1.0)
         return "manga", float(round(0.55 + 0.45 * min(m1, m2), 3))
 
-    if uniq < 0.001 and resid < 0.70 and sat >= 0.05:
+    if resid > 0.75 and uniq < 0.001:
+        m1 = min((resid - 0.75) / 0.25, 1.0)
+        return "manga", float(round(0.55 + 0.45 * m1, 3))
+
+    if uniq < 0.001 and 0.20 < resid < 0.70 and sat >= 0.05:
         m1 = min((0.001 - uniq) / 0.001, 1.0)
         m2 = min((0.70 - resid) / 0.70, 1.0)
-        return "anime", float(round(0.55 + 0.45 * min(m1, m2), 3))
+        m3 = min((resid - 0.20) / 0.20, 1.0)
+        return "anime", float(round(0.55 + 0.45 * min(m1, m2, m3), 3))
 
     return "photo", 0.60
 

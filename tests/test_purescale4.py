@@ -980,6 +980,15 @@ def _style_probe(kind: str) -> np.ndarray:
     if kind == "bw-photo":
         wave = 120 + 60 * np.sin(np.linspace(0, 6, 128))[None, :, None]
         return np.clip(wave + rng.normal(0, 5.0, (128, 128, 3)), 0, 255).astype(np.uint8)
+    if kind == "photo-clean":
+        x = np.linspace(0, 1, 128, dtype=np.float32)[None, :].repeat(128, axis=0)
+        return np.clip(np.stack([x * 180 + 30, x * 150 + 40,
+                                 (1 - x) * 120 + 30], axis=-1), 0, 255).astype(np.uint8)
+    if kind == "photo-blur":
+        return cv2.GaussianBlur(_style_probe("photo-clean"), (15, 15), 4.0)
+    if kind == "manga-color":
+        base = _style_probe("manga").astype(np.float32)
+        return np.clip(base * np.array([1.0, 0.7, 0.4], np.float32), 0, 255).astype(np.uint8)
     # noisy photo gradient
     x = np.linspace(0, 1, 128, dtype=np.float32)[None, :].repeat(128, axis=0)
     base = np.stack([x * 180 + 30, x * 150 + 40, (1 - x) * 120 + 30], axis=-1)
@@ -1006,6 +1015,21 @@ class TestPureScale4AutoStyle(unittest.TestCase):
         # B&W photo without dots must not route to manga.
         style, _ = classify_content_style(_style_probe("bw-photo"))
         self.assertEqual(style, "photo")
+
+        # Clean/blurred gradients must not mimic flat anime color.
+        for kind in ("photo-clean", "photo-blur"):
+            style, _ = classify_content_style(_style_probe(kind))
+            self.assertEqual(style, "photo")
+
+        # Color halftones route to manga despite saturation.
+        style, conf = classify_content_style(_style_probe("manga-color"))
+        self.assertEqual(style, "manga")
+        self.assertGreaterEqual(conf, 0.60)
+
+        # 2D grayscale input must not crash.
+        gray = cv2.cvtColor(_style_probe("manga"), cv2.COLOR_BGR2GRAY)
+        style, _ = classify_content_style(gray)
+        self.assertEqual(style, "manga")
 
     def test_classifier_determinism(self):
         from purescale.dsp.diagnostics import classify_content_style
