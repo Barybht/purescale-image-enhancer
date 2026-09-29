@@ -401,7 +401,7 @@ def auto_tune_parameters(diag: DiagnosticsResult) -> Dict[str, Any]:
         params["enable_dehaze"] = False
         params["dehaze_strength"] = 0.0
 
-    params["color_temperature"] = diag.color_cast_kelvin
+    params["color_temperature"] = int(np.clip(diag.color_cast_kelvin, -30, 30))
     params["vibrance_boost"] = 1.10
 
     return params

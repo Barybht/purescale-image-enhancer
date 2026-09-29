@@ -302,6 +302,38 @@ class TestPureScale4Pipeline(unittest.TestCase):
             PipelineConfig(tile_size=256, tile_overlap=-1)
         with self.assertRaises(ValueError):
             PipelineConfig(tile_size=256, tile_overlap=256)
+        # Documented numeric ranges (README CLI Parameters Reference).
+        for kwargs in (
+            {"dehaze_strength": 1.5}, {"dehaze_strength": -0.1},
+            {"pyramid_micro_texture": 0.4}, {"pyramid_micro_texture": 2.1},
+            {"pyramid_structure_boost": 0.7}, {"pyramid_structure_boost": 1.9},
+            {"sharpen_strength": -0.1}, {"sharpen_strength": 3.1},
+            {"denoise_intensity": 9}, {"denoise_intensity": 101},
+            {"contrast_boost": 0.9}, {"contrast_boost": 4.1},
+            {"brightness_shift": 51}, {"brightness_shift": -51},
+            {"vibrance_boost": 0.9}, {"vibrance_boost": 1.6},
+            {"color_temperature": 31}, {"color_temperature": -31},
+            {"depixel_strength": -1}, {"depixel_strength": 101},
+            {"deblur_strength": 101}, {"portrait_smooth": 101},
+            {"eye_clarity": 0.9}, {"eye_clarity": 2.1},
+            {"output_format": "TIFF"},
+        ):
+            with self.subTest(kwargs=kwargs):
+                with self.assertRaises(ValueError):
+                    PipelineConfig(**kwargs)
+
+    def test_auto_tune_output_validates(self):
+        # Auto-tuner recommendations must always satisfy PipelineConfig ranges
+        # (diagnostics illuminant can report beyond the CAT16 +-30 UI range).
+        from purescale.dsp.diagnostics import DiagnosticsResult, auto_tune_parameters
+
+        diag = DiagnosticsResult(noise_sigma=12.0, blur_score=0.6, entropy=5.0,
+                                 dynamic_range=120, mean_luminance=60.0,
+                                 color_cast_kelvin=50, haze_index=0.5,
+                                 haze_detected=True)
+        params = auto_tune_parameters(diag)
+        cfg = PipelineConfig(**{k: v for k, v in params.items() if hasattr(PipelineConfig(), k)})
+        cfg.validate()
 
     def test_pipeline_grayscale_and_rgba(self):
         pipeline = PureScalePipeline()

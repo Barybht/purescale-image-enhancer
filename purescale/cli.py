@@ -376,6 +376,11 @@ def main(args: List[str] = None) -> int:
         cfg.max_megapixels = parsed.max_megapixels
     cfg.output_format = parsed.format
 
+    try:
+        cfg.validate()
+    except ValueError as err:
+        parser.error(str(err))
+
     quiet = parsed.quiet or parsed.json
 
     reference_bgr: Optional[np.ndarray] = None

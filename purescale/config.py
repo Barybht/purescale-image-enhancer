@@ -107,10 +107,37 @@ class PipelineConfig:
 
     def __post_init__(self) -> None:
         """Validates configuration parameters."""
-        if not (0.5 <= float(self.scale) <= 4.0):
-            raise ValueError(
-                f"Invalid scale factor: {self.scale}. Must satisfy 0.5 <= scale <= 4.0."
-            )
+        self.validate()
+
+    def validate(self) -> None:
+        """Validates all configuration parameters against documented ranges.
+
+        Called automatically on construction; call explicitly after mutating
+        fields (e.g. CLI flag application bypasses ``__post_init__``).
+        """
+        def _range(name: str, lo: float, hi: float) -> None:
+            v = float(getattr(self, name))
+            if not (lo <= v <= hi):
+                raise ValueError(
+                    f"Invalid {name}: {getattr(self, name)!r}. "
+                    f"Must satisfy {lo} <= {name} <= {hi}."
+                )
+
+        _range("scale", 0.5, 4.0)
+        _range("dehaze_strength", 0.0, 1.0)
+        _range("pyramid_micro_texture", 0.5, 2.0)
+        _range("pyramid_structure_boost", 0.8, 1.8)
+        _range("pyramid_dynamic_range", 0.0, 1.0)
+        _range("sharpen_strength", 0.0, 3.0)
+        _range("denoise_intensity", 10, 100)
+        _range("contrast_boost", 1.0, 4.0)
+        _range("brightness_shift", -50, 50)
+        _range("vibrance_boost", 1.0, 1.5)
+        _range("color_temperature", -30, 30)
+        _range("depixel_strength", 0, 100)
+        _range("deblur_strength", 0, 100)
+        _range("portrait_smooth", 0, 100)
+        _range("eye_clarity", 1.0, 2.0)
         if self.tile_size < 32:
             raise ValueError(f"Invalid tile_size: {self.tile_size}. Must be >= 32.")
         if self.tile_overlap < 0 or self.tile_overlap >= self.tile_size:
@@ -121,9 +148,9 @@ class PipelineConfig:
             raise ValueError(
                 f"Invalid max_megapixels: {self.max_megapixels}. Must be > 0."
             )
-        if not (0.0 <= float(self.pyramid_dynamic_range) <= 1.0):
+        if str(self.output_format).upper() not in ("PNG", "JPEG", "WEBP"):
             raise ValueError(
-                f"Invalid pyramid_dynamic_range: {self.pyramid_dynamic_range}. Must satisfy 0.0 <= x <= 1.0."
+                f"Invalid output_format: {self.output_format!r}. Must be PNG, JPEG, or WebP."
             )
 
     def to_dict(self) -> Dict[str, Any]:
