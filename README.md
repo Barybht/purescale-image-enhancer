@@ -142,20 +142,21 @@ python enhance_image.py input.jpg --reference ground-truth.png --json
 
 ### Neural Models & Devices
 
-| Model Key | Task | Native Scale | Size | License |
-| :--- | :--- | :--- | :--- | :--- |
-| `realesr-general-x4v3` | super-resolution | 4x | ~4.87 MB | BSD-3-Clause |
-| `yunet-face` | face-detection | 1x | ~232 KB | Apache-2.0 |
+| Model Key | Task | Style | Native Scale | Size | License |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `realesr-general-x4v3` | super-resolution | photo | 4x | ~4.87 MB | BSD-3-Clause |
+| `realesr-animevideov3-x4` | super-resolution | anime | 4x | ~2.49 MB | BSD-3-Clause |
+| `yunet-face` | face-detection | — | 1x | ~232 KB | Apache-2.0 |
 
 Weights download on first use into `models/` and are SHA256-verified
 (`python enhance_image.py --list-devices` shows cache status).
 Scale-aware routing picks the smallest native scale covering the requested
-magnification, so a future x2 entry would serve `--scale 2.0` directly
-instead of 4x inference followed by downsampling. Execution providers are
-preferred CUDA > DirectML > CPU on `auto`; OpenCV DNN remains the
-zero-dependency fallback.
+magnification, filtered by content style (`--style photo` or `--style anime`).
+Preset `art` defaults to anime style; all other presets default to photo.
+Execution providers are preferred CUDA > DirectML > CPU on `auto`; OpenCV DNN
+remains the zero-dependency fallback.
 
-> **2x penalty & fast path (measured):** only the native 4x model is registered.
+> **2x penalty & fast path (measured):** only native 4x models are registered.
 > The default reference path runs full 4x inference and Lanczos-downsamples
 > (2.0x wall time == 4.0x wall time; 1080p is ~9.0s on GPU, ~32.4s on CPU).
 > PureScale 4.0 provides an experimental fast path (`--fast-2x` or `--preset fast`)
@@ -174,7 +175,8 @@ zero-dependency fallback.
 | `diagnostics` | `--diagnostics` | False | Boolean | **Signal Diagnostics**: Prints formatted ASCII telemetry table without processing. |
 | `mode` | `--mode` | `puredsp` | `puredsp`, `neural`, `hybrid` | **Execution Engine**: Analytical DSP, Neural AI, or Hybrid mode. |
 | `device` | `--device` | `auto` | `auto`, `directml`, `cuda`, `cpu`, `opencv` | **Hardware Accelerator**: CUDA > DirectML > CPU auto-select, or forced backend (OpenCV DNN needs zero extra deps). |
-| `preset` | `-p`, `--preset` | None | `balanced`, `portrait`, `landscape`, `low-light`, `art`, `fast` | **Parameter Profile**: Loads pre-tuned empirical parameter profiles (`fast` skips heavy stages). |
+| `sr_style` | `--style` | `photo` | `photo`, `anime` | **Super-Resolution Style**: Model style selection (`photo` for general images, `anime` for illustrations). |
+| `preset` | `-p`, `--preset` | None | `balanced`, `portrait`, `landscape`, `low-light`, `art`, `fast` | **Parameter Profile**: Loads pre-tuned empirical parameter profiles (`fast` skips heavy stages; `art` uses anime style). |
 | `dehaze` | `--dehaze` | 0.0 | 0.0 - 1.0 | **Atmospheric Dehaze**: Dark Channel Prior (DCP) fog/haze removal strength. |
 | `pyramid_detail` | `--pyramid-detail` | 1.20 | 0.5 - 2.0 | **Micro-Texture Gain**: Multiscale Local Laplacian octave band L1 detail boost. |
 | `pyramid_structure`| `--pyramid-structure`| 1.10 | 0.8 - 1.8 | **Structural Gain**: Multiscale Local Laplacian octave band L2 contour boost. |

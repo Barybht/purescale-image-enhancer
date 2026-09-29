@@ -18,7 +18,10 @@ __all__ = [
     "ProcessingResult",
     "PRESETS",
     "get_preset_config",
+    "VALID_SR_STYLES",
 ]
+
+VALID_SR_STYLES = ("photo", "anime")
 
 
 class ProcessingMode(str, Enum):
@@ -99,6 +102,7 @@ class PipelineConfig:
     tile_size: int = 256
     tile_overlap: int = 32
     enable_fast_2x: bool = False
+    sr_style: str = "photo"
 
     # Memory and Dimension Limits (8K OOM Guard)
     max_megapixels: float = 40.0
@@ -157,6 +161,10 @@ class PipelineConfig:
             raise ValueError(
                 f"Invalid enable_fast_2x: {self.enable_fast_2x!r}. Must be a boolean."
             )
+        if str(self.sr_style).lower() not in VALID_SR_STYLES:
+            raise ValueError(
+                f"Invalid sr_style: {self.sr_style!r}. Must be one of {sorted(VALID_SR_STYLES)}."
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         """Converts config to dictionary representation."""
@@ -188,6 +196,7 @@ class PipelineConfig:
             "tile_size": self.tile_size,
             "tile_overlap": self.tile_overlap,
             "enable_fast_2x": self.enable_fast_2x,
+            "sr_style": self.sr_style,
             "max_megapixels": self.max_megapixels,
             "output_format": self.output_format,
         }
@@ -302,6 +311,7 @@ PRESETS: Dict[str, Dict[str, Any]] = {
         "pyramid_micro_texture": 1.3,
         "pyramid_structure_boost": 1.2,
         "enable_semantic_guidance": True,
+        "sr_style": "anime",
     },
     "fast": {
         "scale": 2.0,

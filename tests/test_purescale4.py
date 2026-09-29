@@ -318,6 +318,7 @@ class TestPureScale4Pipeline(unittest.TestCase):
             {"eye_clarity": 0.9}, {"eye_clarity": 2.1},
             {"output_format": "TIFF"},
             {"enable_fast_2x": "invalid"},
+            {"sr_style": "unknown"},
         ):
             with self.subTest(kwargs=kwargs):
                 with self.assertRaises(ValueError):
@@ -423,6 +424,15 @@ class TestPureScale4CliAndGui(unittest.TestCase):
         code = main([self.temp_in, "-o", self.temp_out, "--preset", "fast", "--no-fast-2x"])
         self.assertEqual(code, 0)
 
+    def test_cli_style_flags(self):
+        from purescale.cli import main
+        code = main([self.temp_in, "-o", self.temp_out, "--preset", "art", "--style", "photo", "--scale", "2.0"])
+        self.assertEqual(code, 0)
+        self.assertTrue(os.path.exists(self.temp_out))
+
+        code = main([self.temp_in, "-o", self.temp_out, "--style", "anime", "--scale", "2.0"])
+        self.assertEqual(code, 0)
+
     def test_headless_gui(self):
         if not _TK_AVAILABLE:
             self.skipTest("tkinter not available on this runner")
@@ -440,9 +450,22 @@ class TestPureScale4CliAndGui(unittest.TestCase):
             self.assertTrue(app.dehaze_switch.get())
             self.assertAlmostEqual(app.dehaze_slider.get(), 0.6)
             self.assertFalse(app.fast_2x_switch.get())
+            self.assertEqual(app.style_seg.get(), "Photo")
+
+            app._on_preset_change("Art")
+            self.assertEqual(app.style_seg.get(), "Anime")
 
             app._on_preset_change("Fast")
             self.assertTrue(app.fast_2x_switch.get())
+            self.assertEqual(app.style_seg.get(), "Photo")
+
+            # Test mode change toggles style_seg state
+            app._on_mode_change("PureDSP")
+            self.assertEqual(app.style_seg.cget("state"), "disabled")
+            app._on_mode_change("Neural AI")
+            self.assertEqual(app.style_seg.cget("state"), "normal")
+            app._on_mode_change("Hybrid")
+            self.assertEqual(app.style_seg.cget("state"), "normal")
 
             # Test HUD update
             from purescale.dsp.diagnostics import diagnose_image
@@ -597,6 +620,26 @@ class TestPureScale4NeuralIntegration(unittest.TestCase):
 
         again = engine.upscale(self.patch, target_scale=2.0, tile_size=32, tile_overlap=4, fast_2x=True)
         self.assertTrue(np.array_equal(fast, again))
+
+    def test_neural_sr_anime_style(self):
+        from purescale.neural.engine import NeuralSuperResEngine
+        from purescale.neural.models import ModelManager
+
+        manager = ModelManager()
+        model_path = manager.get_model_path("realesr-animevideov3-x4", auto_download=False)
+        if not model_path or not os.path.exists(model_path):
+            self.skipTest("Anime super-resolution model weights not downloaded locally.")
+
+        engine = NeuralSuperResEngine(model_key="realesr-animevideov3-x4", target_device=DeviceTarget.CPU)
+        out = engine.upscale(self.patch, target_scale=2.0, tile_size=32, tile_overlap=4)
+        self.assertEqual(out.shape, (64, 64, 3))
+        self.assertEqual(out.dtype, np.uint8)
+
+        # Pipeline integration with sr_style="anime"
+        pipeline = PureScalePipeline()
+        cfg = PipelineConfig(mode=ProcessingMode.NEURAL_AI, scale=2.0, sr_style="anime", tile_size=32, tile_overlap=4)
+        res = pipeline.enhance(self.patch, config=cfg)
+        self.assertEqual(res.image.shape, (64, 64, 3))
 
     def test_portrait_retoucher_inference(self):
         from purescale.neural.portrait import PortraitRetoucher
@@ -787,21 +830,36 @@ class TestPureScale4Models(unittest.TestCase):
             for field in ("filename", "url", "size_bytes", "scale", "task", "description"):
                 self.assertIn(field, info, f"{key} missing {field}")
             self.assertTrue(info["url"].startswith("https://"), key)
+            if info.get("task") == "super-resolution":
+                self.assertIn("style", info, f"{key} missing style")
+                self.assertIn(info["style"], ("photo", "anime"))
 
     def test_resolve_sr_model_prefers_smallest_covering_scale(self):
         from purescale.neural.models import resolve_sr_model
 
         fake = {
-            "sr-x2": {"task": "super-resolution", "scale": 2},
-            "sr-x4": {"task": "super-resolution", "scale": 4},
+            "sr-photo-x2": {"task": "super-resolution", "scale": 2, "style": "photo"},
+            "sr-photo-x4": {"task": "super-resolution", "scale": 4, "style": "photo"},
+            "sr-anime-x4": {"task": "super-resolution", "scale": 4, "style": "anime"},
             "det": {"task": "face-detection", "scale": 1},
         }
-        self.assertEqual(resolve_sr_model(1.5, registry=fake), "sr-x2")
-        self.assertEqual(resolve_sr_model(2.0, registry=fake), "sr-x2")
-        self.assertEqual(resolve_sr_model(3.0, registry=fake), "sr-x4")
-        self.assertEqual(resolve_sr_model(8.0, registry=fake), "sr-x4")
+        self.assertEqual(resolve_sr_model(1.5, style="photo", registry=fake), "sr-photo-x2")
+        self.assertEqual(resolve_sr_model(2.0, style="photo", registry=fake), "sr-photo-x2")
+        self.assertEqual(resolve_sr_model(3.0, style="photo", registry=fake), "sr-photo-x4")
+        self.assertEqual(resolve_sr_model(2.0, style="anime", registry=fake), "sr-anime-x4")
+        with self.assertRaises(ValueError):
+            resolve_sr_model(2.0, style="fantasy", registry=fake)
         with self.assertRaises(ValueError):
             resolve_sr_model(2.0, registry={"det": {"task": "face-detection", "scale": 1}})
+
+    def test_resolve_sr_model_defaults(self):
+        from purescale.neural.models import resolve_sr_model
+
+        self.assertEqual(resolve_sr_model(2.0), "realesr-general-x4v3")
+        self.assertEqual(resolve_sr_model(2.0, style="photo"), "realesr-general-x4v3")
+        self.assertEqual(resolve_sr_model(2.0, style="anime"), "realesr-animevideov3-x4")
+        with self.assertRaises(ValueError):
+            resolve_sr_model(2.0, style="nonexistent")
 
     def test_cached_models_verify(self):
         from purescale.neural.models import MODEL_REGISTRY, ModelManager

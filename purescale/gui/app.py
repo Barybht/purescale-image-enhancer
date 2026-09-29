@@ -267,7 +267,29 @@ class PureScaleApp(ctk.CTk):
             font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
         )
         self.mode_seg.set("PureDSP")
-        self.mode_seg.pack(fill="x", padx=8, pady=(4, 8))
+        self.mode_seg.pack(fill="x", padx=8, pady=(4, 6))
+
+        style_box = ctk.CTkFrame(mode_card, fg_color="transparent")
+        style_box.pack(fill="x", padx=8, pady=(0, 8))
+
+        ctk.CTkLabel(
+            style_box,
+            text="Neural Style:",
+            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
+            text_color="#94a3b8",
+        ).pack(side="left", padx=(0, 6))
+
+        self.style_seg = ctk.CTkSegmentedButton(
+            style_box,
+            values=["Photo", "Anime"],
+            selected_color="#0284c7",
+            unselected_color="#090d16",
+            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
+            height=24,
+        )
+        self.style_seg.set("Photo")
+        self.style_seg.configure(state="disabled")
+        self.style_seg.pack(side="left", fill="x", expand=True)
 
         # 2. Preset Profiles Card (OptionMenu wraps to any preset count;
         # a 6-value SegmentedButton crowds a 380px sidebar and clips).
@@ -550,6 +572,10 @@ class PureScaleApp(ctk.CTk):
         self.denoise_switch.configure(state="normal" if not is_neural else "disabled")
         self.denoise_slider.set_enabled(not is_neural)
 
+        # Style selector: enabled in Neural AI and Hybrid, disabled in PureDSP
+        is_dsp = (mode_str == "PureDSP")
+        self.style_seg.configure(state="disabled" if is_dsp else "normal")
+
     def _on_preset_change(self, preset_name: str) -> None:
         """Loads preset configuration into slider widgets."""
         # CTkOptionMenu may pass a tkinter Event on some bindings; guard.
@@ -605,6 +631,10 @@ class PureScaleApp(ctk.CTk):
             self.fast_2x_switch.select()
         else:
             self.fast_2x_switch.deselect()
+        if getattr(cfg, "sr_style", "photo") == "anime":
+            self.style_seg.set("Anime")
+        else:
+            self.style_seg.set("Photo")
 
     def _on_view_mode_change(self, mode_str: str) -> None:
         """Updates interactive canvas rendering mode."""
@@ -756,6 +786,7 @@ class PureScaleApp(ctk.CTk):
             portrait_smooth=int(self.smooth_slider.get()),
             eye_clarity=self.eye_slider.get(),
             enable_fast_2x=bool(self.fast_2x_switch.get()),
+            sr_style=self.style_seg.get().lower(),
             output_format=self.fmt_seg.get(),
         )
         return cfg

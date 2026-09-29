@@ -229,6 +229,10 @@ $$\text{Complexity}_{\text{fast}} = O\left(\frac{N}{4} \cdot K_{\text{CNN}}\righ
 
 Empirical measurements demonstrate a $3.8\times\text{--}4.9\times$ wall-time reduction on 720p/1080p frames. Because pre-downsampling acts as an anti-aliasing low-pass filter, sub-pixel frequencies on stochastic noise are attenuated prior to deep feature extraction. Consequently, the fast path is gated as an optional stage toggle (`--fast-2x`, `enable_fast_2x`) for latency-critical applications while the reference path remains default for maximum fidelity.
 
+Additionally, the neural super-resolution stage supports style-aware model routing (`sr_style`):
+- `photo` (default): Routes to `realesr-general-x4v3` (~4.87 MB), optimized for realistic textures and natural photographic scenes.
+- `anime`: Routes to `realesr-animevideov3-x4` (~2.49 MB), optimized for clean line-art preservation and flat anime/illustration shading with minimal ringing.
+
 ---
 
 ## 3. Hardware Acceleration & Algorithmic Complexity

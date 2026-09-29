@@ -212,6 +212,12 @@ def main(args: List[str] = None) -> int:
         default="auto",
         help="Hardware acceleration backend for neural model",
     )
+    parser.add_argument(
+        "--style",
+        choices=["photo", "anime"],
+        default=None,
+        help="Neural super-resolution style: photo (realesr-general-x4v3) or anime (realesr-animevideov3-x4)",
+    )
 
     # Preset Selection
     parser.add_argument(
@@ -339,6 +345,8 @@ def main(args: List[str] = None) -> int:
     # Apply Explicit Flags (only when the user passed them)
     cfg.mode = ProcessingMode(parsed.mode)
     cfg.device = DeviceTarget(parsed.device)
+    if parsed.style is not None:
+        cfg.sr_style = parsed.style
     cfg.auto_tune = parsed.auto
     if parsed.auto:
         # Auto-tuning needs diagnostics to compute recommendations.

@@ -19,6 +19,7 @@ DEFAULT_MODELS_DIR = os.path.abspath(
 #   sha256     - hex digest verified against the reference file, or None
 #   scale      - native super-resolution factor (1 = no scaling, e.g. detectors)
 #   task       - "super-resolution" | "face-detection" | "face-restoration"
+#   style      - "photo" | "anime" (for super-resolution models)
 #   license    - upstream license of the weights
 #   description - human-readable summary
 MODEL_REGISTRY = {
@@ -29,8 +30,20 @@ MODEL_REGISTRY = {
         "sha256": "09b757accd747d7e423c1d352b3e8f23e77cc5742d04bae958d4eb8082b76fa4",
         "scale": 4,
         "task": "super-resolution",
+        "style": "photo",
         "license": "BSD-3-Clause",
         "description": "Compact Real-ESRGAN General x4v3 (6-block edge super-resolution, ~4.87 MB)",
+    },
+    "realesr-animevideov3-x4": {
+        "filename": "realesr-animevideov3-x4.onnx",
+        "url": "https://huggingface.co/xiaojiaenen/lingtuan-sr-models/resolve/main/realesr-animevideov3-x4.onnx",
+        "size_bytes": 2496535,
+        "sha256": "14114520123405712c92c2b266a49e906f03b595335e53e3604cdc03c5a408e4",
+        "scale": 4,
+        "task": "super-resolution",
+        "style": "anime",
+        "license": "BSD-3-Clause",
+        "description": "Compact Real-ESRGAN AnimeVideo-v3 x4 (edge anime/illustration super-resolution, ~2.49 MB)",
     },
     "yunet-face": {
         "filename": "face_detection_yunet_2023mar.onnx",
@@ -150,6 +163,7 @@ class ModelManager:
             status.append({
                 "key": key,
                 "task": info.get("task", "unknown"),
+                "style": info.get("style"),
                 "scale": info.get("scale", 1),
                 "license": info.get("license", "unknown"),
                 "description": info.get("description", ""),
@@ -159,22 +173,46 @@ class ModelManager:
         return status
 
 
-def resolve_sr_model(target_scale: float, registry: Optional[Dict[str, Dict[str, object]]] = None) -> str:
-    """Selects the super-resolution model key for a target scale.
+def resolve_sr_model(
+    target_scale: float,
+    style: str = "photo",
+    registry: Optional[Dict[str, Dict[str, object]]] = None,
+) -> str:
+    """Selects the super-resolution model key for a target scale and style.
 
-    Picks the smallest native scale >= ``target_scale`` (avoids wasteful
-    4x inference followed by downsampling); falls back to the largest
-    available scale when none covers the target.
+    Picks the smallest native scale >= ``target_scale`` for the requested style
+    (avoids wasteful 4x inference followed by downsampling); falls back to the
+    largest available scale for that style when none covers the target.
 
     Args:
         target_scale: Requested magnification factor.
+        style: Content style filter ("photo" or "anime"). Default "photo".
         registry: Model registry to search (defaults to ``MODEL_REGISTRY``;
             injectable for tests).
+
+    Raises:
+        ValueError: If ``style`` is unknown or no super-resolution models exist
+            for the requested style.
     """
     reg = registry if registry is not None else MODEL_REGISTRY
-    candidates = [(k, v) for k, v in reg.items() if v.get("task") == "super-resolution"]
-    if not candidates:
+    sr_models = [(k, v) for k, v in reg.items() if v.get("task") == "super-resolution"]
+    if not sr_models:
         raise ValueError("No super-resolution models in registry")
+
+    available_styles = {str(v.get("style", "photo")).lower() for _, v in sr_models}
+    normalized_style = str(style).lower().strip()
+    if normalized_style not in available_styles:
+        raise ValueError(
+            f"Unknown super-resolution style: {style!r}. Available: {sorted(available_styles)}"
+        )
+
+    candidates = [
+        (k, v) for k, v in sr_models
+        if str(v.get("style", "photo")).lower() == normalized_style
+    ]
+    if not candidates:
+        raise ValueError(f"No super-resolution models found for style {style!r}")
+
     covering = sorted(
         ((k, v) for k, v in candidates if float(v.get("scale", 1)) >= float(target_scale)),
         key=lambda kv: float(kv[1].get("scale", 1)),

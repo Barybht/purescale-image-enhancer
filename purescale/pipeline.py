@@ -53,8 +53,9 @@ class PureScalePipeline:
         self,
         target_device: DeviceTarget,
         target_scale: float = 4.0,
+        style: str = "photo",
     ) -> NeuralSuperResEngine:
-        # Scale-aware routing: a native x2 model serves target_scale <= 2
+        # Scale-aware and style-aware routing: a native x2 model serves target_scale <= 2
         # directly instead of 4x inference followed by downsampling. Engines
         # are cached per (model, device); an explicit model_path keeps the
         # legacy single-engine behavior.
@@ -66,7 +67,7 @@ class PureScalePipeline:
                     target_device=target_device,
                 )
             return self._neural_engines[cache_key]
-        model_key = resolve_sr_model(target_scale)
+        model_key = resolve_sr_model(target_scale, style=style)
         cache_key = (model_key, str(target_device))
         if cache_key not in self._neural_engines:
             self._neural_engines[cache_key] = NeuralSuperResEngine(
@@ -272,7 +273,7 @@ class PureScalePipeline:
     ) -> Tuple[np.ndarray, Optional[np.ndarray], str]:
         report(progress_label, progress_ratio)
         t0 = time.perf_counter()
-        engine = self._get_neural_engine(cfg.device, cfg.scale)
+        engine = self._get_neural_engine(cfg.device, cfg.scale, style=cfg.sr_style)
         cur = engine.upscale(
             cur,
             target_scale=cfg.scale,
