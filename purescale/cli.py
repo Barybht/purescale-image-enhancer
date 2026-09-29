@@ -15,6 +15,7 @@ from purescale.config import (
     DeviceTarget,
     PipelineConfig,
     ProcessingMode,
+    PRESETS,
     get_preset_config,
 )
 from purescale.dsp.diagnostics import diagnose_image
@@ -223,7 +224,7 @@ def main(args: List[str] = None) -> int:
     parser.add_argument(
         "--preset",
         "-p",
-        choices=["balanced", "portrait", "landscape", "low-light", "art", "fast"],
+        choices=list(PRESETS.keys()),
         default=None,
         help="Load empirically tuned parameter profile (fast: skips diagnostics/semantic/pyramid/SWF for speed)",
     )
