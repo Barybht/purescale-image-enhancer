@@ -80,6 +80,210 @@ class PureScalePipeline:
             self._portrait_retoucher = PortraitRetoucher()
         return self._portrait_retoucher
 
+    # -------------------------------------------------------------
+    # Shared stage helpers (single implementation used by PureDSP,
+    # Neural AI, and Hybrid modes).
+    # -------------------------------------------------------------
+    @staticmethod
+    def _swf_clean_skip(diag_result: Optional[DiagnosticsResult], cfg: "PipelineConfig") -> bool:
+        """Clean-image skip: diagnosed sigma < 2.0 with default strength
+        bypasses SWF. Matches auto_tune Clean -> enable_denoise=False."""
+        return (
+            diag_result is not None
+            and diag_result.noise_sigma < 2.0
+            and cfg.denoise_intensity <= 35
+        )
+
+    @staticmethod
+    def _blend_with_denoise_map(
+        cur: np.ndarray,
+        denoised: np.ndarray,
+        denoise_map: Optional[np.ndarray],
+    ) -> np.ndarray:
+        if denoise_map is None:
+            return denoised
+        alpha_den = np.clip(denoise_map / 1.5, 0.20, 1.0)[:, :, np.newaxis]
+        return np.clip(
+            np.rint(alpha_den * denoised.astype(np.float32) + (1.0 - alpha_den) * cur.astype(np.float32)),
+            0.0,
+            255.0,
+        ).astype(np.uint8)
+
+    @staticmethod
+    def _scaled_detail_map(
+        detail_map: Optional[np.ndarray],
+        cur: np.ndarray,
+    ) -> Optional[np.ndarray]:
+        if detail_map is None:
+            return None
+        cur_h, cur_w = cur.shape[:2]
+        return cv2.resize(detail_map, (cur_w, cur_h), interpolation=cv2.INTER_LINEAR)
+
+    def _run_swf(
+        self,
+        cur: np.ndarray,
+        cfg: "PipelineConfig",
+        diag_result: Optional[DiagnosticsResult],
+        denoise_map: Optional[np.ndarray],
+        radius: int,
+        iterations: int,
+        stage_key: str,
+        progress_label: str,
+        progress_ratio: float,
+        report: Callable[[str, float], None],
+        stage_latencies: Dict[str, float],
+    ) -> np.ndarray:
+        report(progress_label, progress_ratio)
+        t0 = time.perf_counter()
+        denoised = side_window_filter(
+            cur, radius=radius, iterations=iterations,
+            noise_sigma=diag_result.noise_sigma if diag_result else None,
+        )
+        cur = self._blend_with_denoise_map(cur, denoised, denoise_map)
+        stage_latencies[stage_key] = (time.perf_counter() - t0) * 1000.0
+        return cur
+
+    def _run_pyramid(
+        self,
+        cur: np.ndarray,
+        cfg: "PipelineConfig",
+        noise_damping: float,
+        spatial_detail_mask: Optional[np.ndarray],
+        dynamic_range_compression: float,
+        progress_label: str,
+        progress_ratio: float,
+        report: Callable[[str, float], None],
+        stage_latencies: Dict[str, float],
+    ) -> np.ndarray:
+        report(progress_label, progress_ratio)
+        t0 = time.perf_counter()
+        cur = multiscale_laplacian_filter(
+            cur,
+            micro_texture_gain=cfg.pyramid_micro_texture,
+            structure_boost=cfg.pyramid_structure_boost,
+            noise_damping=noise_damping,
+            dynamic_range_compression=dynamic_range_compression,
+            spatial_detail_mask=spatial_detail_mask,
+        )
+        stage_latencies["multiscale_laplacian"] = (time.perf_counter() - t0) * 1000.0
+        return cur
+
+    def _run_bimef(
+        self,
+        cur: np.ndarray,
+        cfg: "PipelineConfig",
+        progress_label: str,
+        progress_ratio: float,
+        report: Callable[[str, float], None],
+        stage_latencies: Dict[str, float],
+    ) -> np.ndarray:
+        if not (cfg.enable_contrast and cfg.contrast_boost > 1.0):
+            return cur
+        report(progress_label, progress_ratio)
+        t0 = time.perf_counter()
+        cur = bimef_exposure_fusion(cur, contrast_boost=cfg.contrast_boost)
+        stage_latencies["bimef_contrast"] = (time.perf_counter() - t0) * 1000.0
+        return cur
+
+    def _run_cas(
+        self,
+        cur: np.ndarray,
+        strength: float,
+        progress_label: str,
+        progress_ratio: float,
+        report: Callable[[str, float], None],
+        stage_latencies: Dict[str, float],
+    ) -> np.ndarray:
+        if not strength > 0.0:
+            return cur
+        report(progress_label, progress_ratio)
+        t0 = time.perf_counter()
+        cur = contrast_adaptive_sharpen(cur, strength=strength)
+        stage_latencies["cas_sharpen"] = (time.perf_counter() - t0) * 1000.0
+        return cur
+
+    def _run_portrait(
+        self,
+        cur: np.ndarray,
+        cfg: "PipelineConfig",
+        progress_label: str,
+        progress_ratio: float,
+        report: Callable[[str, float], None],
+        stage_latencies: Dict[str, float],
+    ) -> Tuple[np.ndarray, int]:
+        if not (cfg.portrait_smooth > 0 or cfg.eye_clarity > 1.0):
+            return cur, 0
+        report(progress_label, progress_ratio)
+        t0 = time.perf_counter()
+        retoucher = self._get_portrait_retoucher()
+        cur, faces_detected = retoucher.enhance(
+            cur,
+            portrait_smooth=cfg.portrait_smooth,
+            eye_clarity=cfg.eye_clarity,
+        )
+        stage_latencies["portrait_retouch"] = (time.perf_counter() - t0) * 1000.0
+        return cur, faces_detected
+
+    def _run_oklab(
+        self,
+        cur: np.ndarray,
+        cfg: "PipelineConfig",
+        progress_label: str,
+        progress_ratio: float,
+        report: Callable[[str, float], None],
+        stage_latencies: Dict[str, float],
+    ) -> np.ndarray:
+        if cfg.vibrance_boost == 1.0:
+            return cur
+        report(progress_label, progress_ratio)
+        t0 = time.perf_counter()
+        cur = oklab_vibrance(cur, boost=cfg.vibrance_boost)
+        stage_latencies["oklab_vibrance"] = (time.perf_counter() - t0) * 1000.0
+        return cur
+
+    def _run_cat16(
+        self,
+        cur: np.ndarray,
+        cfg: "PipelineConfig",
+        progress_label: str,
+        progress_ratio: float,
+        report: Callable[[str, float], None],
+        stage_latencies: Dict[str, float],
+    ) -> np.ndarray:
+        if cfg.color_temperature == 0:
+            return cur
+        report(progress_label, progress_ratio)
+        t0 = time.perf_counter()
+        cur = bradford_cat16_white_balance(cur, temperature_offset=cfg.color_temperature)
+        stage_latencies["cat16_wb"] = (time.perf_counter() - t0) * 1000.0
+        return cur
+
+    def _run_neural_upscale(
+        self,
+        cur: np.ndarray,
+        alpha: Optional[np.ndarray],
+        cfg: "PipelineConfig",
+        dest_w: int,
+        dest_h: int,
+        progress_label: str,
+        progress_ratio: float,
+        report: Callable[[str, float], None],
+        stage_latencies: Dict[str, float],
+    ) -> Tuple[np.ndarray, Optional[np.ndarray], str]:
+        report(progress_label, progress_ratio)
+        t0 = time.perf_counter()
+        engine = self._get_neural_engine(cfg.device, cfg.scale)
+        cur = engine.upscale(
+            cur,
+            target_scale=cfg.scale,
+            tile_size=cfg.tile_size,
+            tile_overlap=cfg.tile_overlap,
+        )
+        if alpha is not None:
+            alpha = cv2.resize(alpha, (dest_w, dest_h), interpolation=cv2.INTER_LANCZOS4)
+        stage_latencies["neural_superres"] = (time.perf_counter() - t0) * 1000.0
+        return cur, alpha, engine.backend_name
+
     def enhance(
         self,
         img: np.ndarray,
@@ -211,33 +415,14 @@ class PureScalePipeline:
         # -------------------------------------------------------------
         if mode == ProcessingMode.PURE_DSP:
             # 1. Structural Denoise (SWF)
-            # Clean-image skip: diagnosed sigma < 2.0 with default strength
-            # bypasses ~75ms (VGA) to ~1000ms (1080p). Matches auto_tune
-            # Clean -> enable_denoise=False when --auto is used.
-            _swf_clean_skip = (
-                diag_result is not None
-                and diag_result.noise_sigma < 2.0
-                and cfg.denoise_intensity <= 35
-            )
-            if cfg.enable_denoise and cfg.denoise_intensity > 0 and not _swf_clean_skip:
-                report("Structural Denoising (SWF)", 0.18)
-                t0 = time.perf_counter()
+            if cfg.enable_denoise and cfg.denoise_intensity > 0 and not self._swf_clean_skip(diag_result, cfg):
                 r = max(1, int(round(cfg.denoise_intensity / 25.0)))
                 iters = 1 if cfg.denoise_intensity <= 60 else 2
-                denoised = side_window_filter(
-                    cur, radius=r, iterations=iters,
-                    noise_sigma=diag_result.noise_sigma if diag_result else None,
+                cur = self._run_swf(
+                    cur, cfg, diag_result, denoise_map, radius=r, iterations=iters,
+                    stage_key="swf_denoise", progress_label="Structural Denoising (SWF)",
+                    progress_ratio=0.18, report=report, stage_latencies=stage_latencies,
                 )
-                if denoise_map is not None:
-                    alpha_den = np.clip(denoise_map / 1.5, 0.20, 1.0)[:, :, np.newaxis]
-                    cur = np.clip(
-                        np.rint(alpha_den * denoised.astype(np.float32) + (1.0 - alpha_den) * cur.astype(np.float32)),
-                        0.0,
-                        255.0,
-                    ).astype(np.uint8)
-                else:
-                    cur = denoised
-                stage_latencies["swf_denoise"] = (time.perf_counter() - t0) * 1000.0
 
             # 2. Spatial Scaling (EASU)
             if cfg.scale != 1.0:
@@ -249,31 +434,24 @@ class PureScalePipeline:
                 stage_latencies["easu_upsample"] = (time.perf_counter() - t0) * 1000.0
 
             # Scale detail guidance map to match new resolution if needed
-            scaled_detail_map = None
-            if detail_map is not None:
-                cur_h, cur_w = cur.shape[:2]
-                scaled_detail_map = cv2.resize(detail_map, (cur_w, cur_h), interpolation=cv2.INTER_LINEAR)
+            scaled_detail_map = self._scaled_detail_map(detail_map, cur)
 
             # 3. Multiscale Local Laplacian Pyramid Filtering
             if cfg.enable_pyramid:
-                report("Multiscale Local Laplacian Pyramid", 0.48)
-                t0 = time.perf_counter()
-                cur = multiscale_laplacian_filter(
-                    cur,
-                    micro_texture_gain=cfg.pyramid_micro_texture,
-                    structure_boost=cfg.pyramid_structure_boost,
+                cur = self._run_pyramid(
+                    cur, cfg,
                     noise_damping=0.15 if (diag_result and diag_result.noise_sigma > 4.0) else 0.0,
-                    dynamic_range_compression=cfg.pyramid_dynamic_range,
                     spatial_detail_mask=scaled_detail_map,
+                    dynamic_range_compression=cfg.pyramid_dynamic_range,
+                    progress_label="Multiscale Local Laplacian Pyramid",
+                    progress_ratio=0.48, report=report, stage_latencies=stage_latencies,
                 )
-                stage_latencies["multiscale_laplacian"] = (time.perf_counter() - t0) * 1000.0
 
             # 4. Dynamic Range Fusion (BIMEF with Black-Point Pinning)
-            if cfg.enable_contrast and cfg.contrast_boost > 1.0:
-                report("Dynamic Range Fusion (BIMEF)", 0.60)
-                t0 = time.perf_counter()
-                cur = bimef_exposure_fusion(cur, contrast_boost=cfg.contrast_boost)
-                stage_latencies["bimef_contrast"] = (time.perf_counter() - t0) * 1000.0
+            cur = self._run_bimef(
+                cur, cfg, progress_label="Dynamic Range Fusion (BIMEF)",
+                progress_ratio=0.60, report=report, stage_latencies=stage_latencies,
+            )
 
             # 5. Radiometric Exposure Offset
             if cfg.brightness_shift != 0:
@@ -283,182 +461,118 @@ class PureScalePipeline:
                 stage_latencies["exposure_offset"] = (time.perf_counter() - t0) * 1000.0
 
             # 6. Detail Clarity (CAS)
-            if cfg.sharpen_strength > 0.0:
-                report("Contrast-Adaptive Sharpening (CAS)", 0.76)
-                t0 = time.perf_counter()
-                cur = contrast_adaptive_sharpen(cur, strength=cfg.sharpen_strength)
-                stage_latencies["cas_sharpen"] = (time.perf_counter() - t0) * 1000.0
+            cur = self._run_cas(
+                cur, cfg.sharpen_strength,
+                progress_label="Contrast-Adaptive Sharpening (CAS)",
+                progress_ratio=0.76, report=report, stage_latencies=stage_latencies,
+            )
 
             # 7. Portrait Retouching (YuNet + FGF)
-            if cfg.portrait_smooth > 0 or cfg.eye_clarity > 1.0:
-                report("Portrait Retouching (YuNet + FGF)", 0.84)
-                t0 = time.perf_counter()
-                retoucher = self._get_portrait_retoucher()
-                cur, faces_detected = retoucher.enhance(
-                    cur,
-                    portrait_smooth=cfg.portrait_smooth,
-                    eye_clarity=cfg.eye_clarity,
-                )
-                stage_latencies["portrait_retouch"] = (time.perf_counter() - t0) * 1000.0
+            cur, faces_detected = self._run_portrait(
+                cur, cfg, progress_label="Portrait Retouching (YuNet + FGF)",
+                progress_ratio=0.84, report=report, stage_latencies=stage_latencies,
+            )
 
             # 8. Perceptual Vibrance (Oklab)
-            if cfg.vibrance_boost != 1.0:
-                report("Perceptual Vibrance (Oklab)", 0.92)
-                t0 = time.perf_counter()
-                cur = oklab_vibrance(cur, boost=cfg.vibrance_boost)
-                stage_latencies["oklab_vibrance"] = (time.perf_counter() - t0) * 1000.0
+            cur = self._run_oklab(
+                cur, cfg, progress_label="Perceptual Vibrance (Oklab)",
+                progress_ratio=0.92, report=report, stage_latencies=stage_latencies,
+            )
 
             # 9. White Balance (Bradford CAT16)
-            if cfg.color_temperature != 0:
-                report("White Balance (CAT16)", 0.96)
-                t0 = time.perf_counter()
-                cur = bradford_cat16_white_balance(cur, temperature_offset=cfg.color_temperature)
-                stage_latencies["cat16_wb"] = (time.perf_counter() - t0) * 1000.0
+            cur = self._run_cat16(
+                cur, cfg, progress_label="White Balance (CAT16)",
+                progress_ratio=0.96, report=report, stage_latencies=stage_latencies,
+            )
 
         # -------------------------------------------------------------
         # MODE 2: NEURAL AI (Compact Edge AI Super-Resolution)
         # -------------------------------------------------------------
         elif mode == ProcessingMode.NEURAL_AI:
-            report("Neural AI Super-Resolution (Real-ESRGAN Compact)", 0.25)
-            t0 = time.perf_counter()
-            engine = self._get_neural_engine(cfg.device, cfg.scale)
-            active_backend = engine.backend_name
-
-            cur = engine.upscale(
-                cur,
-                target_scale=cfg.scale,
-                tile_size=cfg.tile_size,
-                tile_overlap=cfg.tile_overlap,
+            cur, alpha, active_backend = self._run_neural_upscale(
+                cur, alpha, cfg, dest_w, dest_h,
+                progress_label="Neural AI Super-Resolution (Real-ESRGAN Compact)",
+                progress_ratio=0.25, report=report, stage_latencies=stage_latencies,
             )
-            if alpha is not None:
-                alpha = cv2.resize(alpha, (dest_w, dest_h), interpolation=cv2.INTER_LANCZOS4)
-            stage_latencies["neural_superres"] = (time.perf_counter() - t0) * 1000.0
 
             # Multiscale Laplacian refinement
             if cfg.enable_pyramid:
-                report("Multiscale Laplacian Refinement", 0.70)
-                t0 = time.perf_counter()
-                cur = multiscale_laplacian_filter(
-                    cur,
-                    micro_texture_gain=cfg.pyramid_micro_texture,
-                    structure_boost=cfg.pyramid_structure_boost,
+                cur = self._run_pyramid(
+                    cur, cfg, noise_damping=0.0, spatial_detail_mask=None,
+                    dynamic_range_compression=0.0,
+                    progress_label="Multiscale Laplacian Refinement",
+                    progress_ratio=0.70, report=report, stage_latencies=stage_latencies,
                 )
-                stage_latencies["multiscale_laplacian"] = (time.perf_counter() - t0) * 1000.0
 
             # Optional Portrait Retouching
-            if cfg.portrait_smooth > 0 or cfg.eye_clarity > 1.0:
-                report("Portrait Retouching (YuNet + FGF)", 0.85)
-                t0 = time.perf_counter()
-                retoucher = self._get_portrait_retoucher()
-                cur, faces_detected = retoucher.enhance(
-                    cur,
-                    portrait_smooth=cfg.portrait_smooth,
-                    eye_clarity=cfg.eye_clarity,
-                )
-                stage_latencies["portrait_retouch"] = (time.perf_counter() - t0) * 1000.0
+            cur, faces_detected = self._run_portrait(
+                cur, cfg, progress_label="Portrait Retouching (YuNet + FGF)",
+                progress_ratio=0.85, report=report, stage_latencies=stage_latencies,
+            )
 
         # -------------------------------------------------------------
         # MODE 3: HYBRID (Neural AI Edge Synthesis + Multiscale DSP)
         # -------------------------------------------------------------
         elif mode == ProcessingMode.HYBRID:
             # 1. Subtle Structural Denoise before neural pass (SWF)
-            _swf_clean_skip = (
-                diag_result is not None
-                and diag_result.noise_sigma < 2.0
-                and cfg.denoise_intensity <= 35
-            )
-            if cfg.enable_denoise and cfg.denoise_intensity > 0 and not _swf_clean_skip:
-                report("Pre-Denoising (SWF)", 0.15)
-                t0 = time.perf_counter()
+            if cfg.enable_denoise and cfg.denoise_intensity > 0 and not self._swf_clean_skip(diag_result, cfg):
                 r = max(1, int(round(cfg.denoise_intensity / 40.0)))
-                denoised = side_window_filter(
-                    cur, radius=r, iterations=1,
-                    noise_sigma=diag_result.noise_sigma if diag_result else None,
+                cur = self._run_swf(
+                    cur, cfg, diag_result, denoise_map, radius=r, iterations=1,
+                    stage_key="swf_pre_denoise", progress_label="Pre-Denoising (SWF)",
+                    progress_ratio=0.15, report=report, stage_latencies=stage_latencies,
                 )
-                if denoise_map is not None:
-                    alpha_den = np.clip(denoise_map / 1.5, 0.20, 1.0)[:, :, np.newaxis]
-                    cur = np.clip(
-                        np.rint(alpha_den * denoised.astype(np.float32) + (1.0 - alpha_den) * cur.astype(np.float32)),
-                        0.0,
-                        255.0,
-                    ).astype(np.uint8)
-                else:
-                    cur = denoised
-                stage_latencies["swf_pre_denoise"] = (time.perf_counter() - t0) * 1000.0
 
             # 2. Neural Edge Synthesis
-            report("Neural Edge Synthesis (Real-ESRGAN Compact)", 0.35)
-            t0 = time.perf_counter()
-            engine = self._get_neural_engine(cfg.device, cfg.scale)
-            active_backend = engine.backend_name
-
-            cur = engine.upscale(
-                cur,
-                target_scale=cfg.scale,
-                tile_size=cfg.tile_size,
-                tile_overlap=cfg.tile_overlap,
+            cur, alpha, active_backend = self._run_neural_upscale(
+                cur, alpha, cfg, dest_w, dest_h,
+                progress_label="Neural Edge Synthesis (Real-ESRGAN Compact)",
+                progress_ratio=0.35, report=report, stage_latencies=stage_latencies,
             )
-            if alpha is not None:
-                alpha = cv2.resize(alpha, (dest_w, dest_h), interpolation=cv2.INTER_LANCZOS4)
-            stage_latencies["neural_superres"] = (time.perf_counter() - t0) * 1000.0
 
-            scaled_detail_map = None
-            if detail_map is not None:
-                cur_h, cur_w = cur.shape[:2]
-                scaled_detail_map = cv2.resize(detail_map, (cur_w, cur_h), interpolation=cv2.INTER_LINEAR)
+            scaled_detail_map = self._scaled_detail_map(detail_map, cur)
 
             # 3. Multiscale Local Laplacian Pyramid Filtering
             if cfg.enable_pyramid:
-                report("Multiscale Local Laplacian Pyramid", 0.55)
-                t0 = time.perf_counter()
-                cur = multiscale_laplacian_filter(
-                    cur,
-                    micro_texture_gain=cfg.pyramid_micro_texture,
-                    structure_boost=cfg.pyramid_structure_boost,
+                cur = self._run_pyramid(
+                    cur, cfg,
                     noise_damping=0.10 if (diag_result and diag_result.noise_sigma > 4.0) else 0.0,
                     spatial_detail_mask=scaled_detail_map,
+                    dynamic_range_compression=0.0,
+                    progress_label="Multiscale Local Laplacian Pyramid",
+                    progress_ratio=0.55, report=report, stage_latencies=stage_latencies,
                 )
-                stage_latencies["multiscale_laplacian"] = (time.perf_counter() - t0) * 1000.0
 
             # 4. Dynamic Range Fusion (BIMEF with Black-Point Pinning)
-            if cfg.enable_contrast and cfg.contrast_boost > 1.0:
-                report("Dynamic Range Fusion (BIMEF)", 0.65)
-                t0 = time.perf_counter()
-                cur = bimef_exposure_fusion(cur, contrast_boost=cfg.contrast_boost)
-                stage_latencies["bimef_contrast"] = (time.perf_counter() - t0) * 1000.0
+            cur = self._run_bimef(
+                cur, cfg, progress_label="Dynamic Range Fusion (BIMEF)",
+                progress_ratio=0.65, report=report, stage_latencies=stage_latencies,
+            )
 
             # 5. Micro-Texture Clarity (CAS)
-            if cfg.sharpen_strength > 0.0:
-                report("Micro-Texture Sharpening (CAS)", 0.75)
-                t0 = time.perf_counter()
-                cur = contrast_adaptive_sharpen(cur, strength=cfg.sharpen_strength * 0.7)
-                stage_latencies["cas_sharpen"] = (time.perf_counter() - t0) * 1000.0
+            cur = self._run_cas(
+                cur, cfg.sharpen_strength * 0.7,
+                progress_label="Micro-Texture Sharpening (CAS)",
+                progress_ratio=0.75, report=report, stage_latencies=stage_latencies,
+            )
 
             # 6. Portrait Retouching (YuNet + FGF)
-            if cfg.portrait_smooth > 0 or cfg.eye_clarity > 1.0:
-                report("Portrait Retouching (YuNet + FGF)", 0.83)
-                t0 = time.perf_counter()
-                retoucher = self._get_portrait_retoucher()
-                cur, faces_detected = retoucher.enhance(
-                    cur,
-                    portrait_smooth=cfg.portrait_smooth,
-                    eye_clarity=cfg.eye_clarity,
-                )
-                stage_latencies["portrait_retouch"] = (time.perf_counter() - t0) * 1000.0
+            cur, faces_detected = self._run_portrait(
+                cur, cfg, progress_label="Portrait Retouching (YuNet + FGF)",
+                progress_ratio=0.83, report=report, stage_latencies=stage_latencies,
+            )
 
             # 7. Perceptual Color Vibrance (Oklab)
-            if cfg.vibrance_boost != 1.0:
-                report("Perceptual Color Vibrance (Oklab)", 0.90)
-                t0 = time.perf_counter()
-                cur = oklab_vibrance(cur, boost=cfg.vibrance_boost)
-                stage_latencies["oklab_vibrance"] = (time.perf_counter() - t0) * 1000.0
+            cur = self._run_oklab(
+                cur, cfg, progress_label="Perceptual Color Vibrance (Oklab)",
+                progress_ratio=0.90, report=report, stage_latencies=stage_latencies,
+            )
 
             # 8. White Balance (Bradford CAT16)
-            if cfg.color_temperature != 0:
-                report("White Balance (CAT16)", 0.96)
-                t0 = time.perf_counter()
-                cur = bradford_cat16_white_balance(cur, temperature_offset=cfg.color_temperature)
-                stage_latencies["cat16_wb"] = (time.perf_counter() - t0) * 1000.0
+            cur = self._run_cat16(
+                cur, cfg, progress_label="White Balance (CAT16)",
+                progress_ratio=0.96, report=report, stage_latencies=stage_latencies,
+            )
 
         if is_grayscale:
             cur = cv2.cvtColor(cur, cv2.COLOR_BGR2GRAY)
