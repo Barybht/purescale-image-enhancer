@@ -14,12 +14,14 @@ import numpy as np
 from PIL import Image
 
 from purescale.config import (
+    PRESETS,
     DeviceTarget,
     DiagnosticsResult,
     PipelineConfig,
     ProcessingMode,
     ProcessingResult,
     get_preset_config,
+    valid_sr_styles,
 )
 from purescale.dsp.diagnostics import auto_tune_parameters, diagnose_image
 from purescale.dsp.semantic import extract_semantic_masks
@@ -281,7 +283,7 @@ class PureScaleApp(ctk.CTk):
 
         self.style_seg = ctk.CTkSegmentedButton(
             style_box,
-            values=["Photo", "Anime"],
+            values=[s.title() for s in valid_sr_styles()],
             selected_color="#0284c7",
             unselected_color="#090d16",
             font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
@@ -302,17 +304,18 @@ class PureScaleApp(ctk.CTk):
             border_width=0,
             help_text=(
                 "One-click parameter sets.\n\n"
-                "Balanced / Portrait / Landscape / Low-Light / Art tune "
-                "sharpening, denoise, contrast and color for the scene.\n"
+                "Balanced / Portrait / Landscape / Low-Light / Art / Manga "
+                "tune sharpening, denoise, contrast and color for the scene.\n"
                 "Fast disables diagnostics, semantic guidance, pyramid and "
-                "denoising for maximum speed."
+                "denoising for maximum speed. Manga preserves screentones "
+                "and targets anime-style neural weights."
             ),
         )
         preset_card.pack(fill="x", padx=12, pady=4)
 
         self.preset_opt = ctk.CTkOptionMenu(
             preset_card,
-            values=["Balanced", "Portrait", "Landscape", "Low-Light", "Art", "Fast"],
+            values=[name.title() for name in PRESETS],
             command=self._on_preset_change,
             fg_color="#131b2e",
             button_color="#0284c7",
@@ -590,6 +593,9 @@ class PureScaleApp(ctk.CTk):
         is_dsp = (mode_str == "PureDSP")
         self.style_seg.configure(state="disabled" if is_dsp else "normal")
 
+        # 2x fast path: neural-only toggle, meaningless in PureDSP
+        self.fast_2x_switch.configure(state="disabled" if is_dsp else "normal")
+
     def _on_preset_change(self, preset_name: str) -> None:
         """Loads preset configuration into slider widgets."""
         # CTkOptionMenu may pass a tkinter Event on some bindings; guard.
@@ -652,10 +658,9 @@ class PureScaleApp(ctk.CTk):
             self.fast_2x_switch.select()
         else:
             self.fast_2x_switch.deselect()
-        if getattr(cfg, "sr_style", "photo") == "anime":
-            self.style_seg.set("Anime")
-        else:
-            self.style_seg.set("Photo")
+        style_labels = [s.title() for s in valid_sr_styles()]
+        style_label = str(getattr(cfg, "sr_style", "photo")).title()
+        self.style_seg.set(style_label if style_label in style_labels else style_labels[0])
 
     def _on_view_mode_change(self, mode_str: str) -> None:
         """Updates interactive canvas rendering mode."""
