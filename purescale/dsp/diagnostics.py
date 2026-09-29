@@ -27,6 +27,8 @@ class DiagnosticsResult:
     color_cast_name: str = "Neutral"  # "Neutral", "Warm", "Cool", "Green", "Magenta"
     haze_index: float = 0.0           # Atmospheric veiling index (0.0=clear, 1.0=dense haze)
     haze_detected: bool = False       # True if haze index exceeds atmospheric threshold
+    suggested_style: str = "photo"    # Content classification: "photo", "anime", or "manga"
+    style_confidence: float = 0.0     # Classification confidence in [0.0, 1.0]
     semantic_breakdown: Dict[str, float] = field(default_factory=dict)
     recommended_parameters: Dict[str, Any] = field(default_factory=dict)
 
@@ -48,6 +50,7 @@ class DiagnosticsResult:
             row(f"Shadow/High Clipping: {self.shadow_clipping:5.1f}% / {self.highlight_clipping:4.1f}%"),
             row(f"Color Cast Offset   : {self.color_cast_kelvin:+5d}        [{self.color_cast_name:<8}]"),
             row(f"Atmospheric Haze    : {self.haze_index:6.3f}       [{'HAZY' if self.haze_detected else 'CLEAR':<8}]"),
+            row(f"Content Style       : {self.suggested_style:<8} [{self.style_confidence:4.2f} confidence]"),
         ]
         if self.semantic_breakdown:
             items = [f"{k}: {v * 100:.0f}%" for k, v in self.semantic_breakdown.items() if v > 0.05]
@@ -272,6 +275,54 @@ def estimate_atmospheric_haze(img_bgr: np.ndarray) -> Tuple[float, bool]:
     return haze_index, is_hazy
 
 
+def classify_content_style(img_bgr: np.ndarray) -> Tuple[str, float]:
+    """
+    Classifies image content into a processing style ("photo", "anime",
+    "manga") from cheap proxy signals, deterministically.
+
+    Signals (160px proxy): mean HSV saturation, quantized unique-color
+    fraction (5 bits/channel), and high-pass residual energy ratio
+    (dot/line-scale structure vs broadband variance).
+
+    Decision order (first match wins):
+    - manga: near-zero saturation with strong fine-periodic energy
+      (halftone screentones). B&W photos fail the energy gate.
+    - anime: very few distinct colors with ink-edge energy and real color.
+    - photo: fallback for natural imagery.
+
+    Returns:
+        Tuple of (style, confidence in [0.0, 1.0]).
+    """
+    h, w = img_bgr.shape[:2]
+    scale = min(1.0, 160.0 / max(h, w))
+    if scale < 1.0:
+        small = cv2.resize(img_bgr, (0, 0), fx=scale, fy=scale,
+                           interpolation=cv2.INTER_AREA)
+    else:
+        small = img_bgr
+
+    hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
+    sat = float(hsv[:, :, 1].astype(np.float32).mean() / 255.0)
+
+    q = (small.astype(np.uint16) >> 5).reshape(-1, 3)
+    uniq = float(len(np.unique(q[:, 0] * 1024 + q[:, 1] * 32 + q[:, 2]))) / float(q.shape[0])
+
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    resid = float((gray - cv2.GaussianBlur(gray, (9, 9), 2.0)).std() / (gray.std() + 1e-6))
+
+    if sat < 0.05 and resid > 0.60:
+        m1 = min((resid - 0.60) / 0.40, 1.0)
+        m2 = min((0.05 - sat) / 0.05, 1.0)
+        return "manga", float(round(0.55 + 0.45 * min(m1, m2), 3))
+
+    if uniq < 0.001 and resid < 0.70 and sat >= 0.05:
+        m1 = min((0.001 - uniq) / 0.001, 1.0)
+        m2 = min((0.70 - resid) / 0.70, 1.0)
+        return "anime", float(round(0.55 + 0.45 * min(m1, m2), 3))
+
+    return "photo", 0.60
+
+
 def diagnose_image(
     img_bgr: np.ndarray,
     semantic_breakdown: Optional[Dict[str, float]] = None,
@@ -303,6 +354,9 @@ def diagnose_image(
     # 5. Atmospheric Haze
     haze_index, is_hazy = estimate_atmospheric_haze(img_bgr)
 
+    # 6. Content Style Classification (photo / anime / manga)
+    suggested_style, style_confidence = classify_content_style(img_bgr)
+
     result = DiagnosticsResult(
         noise_sigma=noise_sigma,
         noise_category=noise_cat,
@@ -317,10 +371,12 @@ def diagnose_image(
         color_cast_name=cast_name,
         haze_index=haze_index,
         haze_detected=is_hazy,
+        suggested_style=suggested_style,
+        style_confidence=style_confidence,
         semantic_breakdown=semantic_breakdown or {},
     )
 
-    # 6. Autonomous Parameter Synthesis
+    # 7. Autonomous Parameter Synthesis
     result.recommended_parameters = auto_tune_parameters(result)
 
     return result

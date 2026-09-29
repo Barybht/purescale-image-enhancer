@@ -188,7 +188,8 @@ automatically, filling only parameters still at library defaults
 | `diagnostics` | `--diagnostics` | False | Boolean | **Signal Diagnostics**: Prints formatted ASCII telemetry table without processing. |
 | `mode` | `--mode` | `puredsp` | `puredsp`, `neural`, `hybrid` | **Execution Engine**: Analytical DSP, Neural AI, or Hybrid mode. |
 | `device` | `--device` | `auto` | `auto`, `directml`, `cuda`, `cpu`, `opencv` | **Hardware Accelerator**: CUDA > DirectML > CPU auto-select, or forced backend (OpenCV DNN needs zero extra deps). |
-| `sr_style` | `--style` | `photo` | registry styles | **Super-Resolution Style**: Neural weights + DSP profile family (`photo` for general images, `anime` for illustrations). |
+| `sr_style` | `--style` | `photo` | registry styles | **Super-Resolution Style**: Neural weights + DSP profile family (`photo` for general images, `anime` for illustrations). Explicit choice always beats auto-detect. |
+| `auto_style` | `--auto-style` | False | Boolean | **Style Auto-Detect**: Classify content (photo/anime/manga) and re-route automatically at >= 0.60 confidence (implied by `--auto`). Manga content sets the DSP profile only (no manga weights exist). |
 | `style_profile` | `--style-profile` | follows style | `photo`, `anime`, `manga` | **DSP Profile Override**: Style parameter profile independent of neural weights (`manga` has DSP tuning but no dedicated weights yet). |
 | `preset` | `-p`, `--preset` | None | `balanced`, `portrait`, `landscape`, `low-light`, `art`, `manga`, `fast` | **Parameter Profile**: Loads pre-tuned empirical parameter profiles (`manga` preserves halftone screentones with denoise off; `art` uses anime style; `fast` skips heavy stages). |
 | `dehaze` | `--dehaze` | 0.0 | 0.0 - 1.0 | **Atmospheric Dehaze**: Dark Channel Prior (DCP) fog/haze removal strength. |

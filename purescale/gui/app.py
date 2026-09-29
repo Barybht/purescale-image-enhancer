@@ -293,6 +293,11 @@ class PureScaleApp(ctk.CTk):
         self.style_seg.configure(state="disabled")
         self.style_seg.pack(side="left", fill="x", expand=True)
 
+        self.auto_style_switch = ctk.CTkSwitch(
+            mode_card, text="Auto-detect content style",
+            font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
+        self.auto_style_switch.pack(anchor="w", padx=12, pady=(0, 8))
+
         # 2. Preset Profiles Card (OptionMenu wraps to any preset count;
         # a 6-value SegmentedButton crowds a 380px sidebar and clips).
         # Borderless card: the dropdown field itself carries the visual weight,
@@ -802,6 +807,7 @@ class PureScaleApp(ctk.CTk):
             device=DeviceTarget.AUTO,
             enable_diagnostics=bool(self.diagnostics_switch.get()),
             auto_tune=False,
+            auto_style=bool(self.auto_style_switch.get()),
             enable_dehaze=bool(self.dehaze_switch.get()),
             dehaze_strength=self.dehaze_slider.get(),
             enable_pyramid=bool(self.pyramid_switch.get()),

@@ -11,6 +11,7 @@ import cv2
 import numpy as np
 
 from purescale.config import (
+    AUTO_STYLE_CONFIDENCE,
     DeviceTarget,
     DiagnosticsResult,
     PipelineConfig,
@@ -384,7 +385,7 @@ class PureScalePipeline:
         denoise_map: Optional[np.ndarray] = None
         semantic_breakdown = {}
 
-        if cfg.enable_diagnostics or cfg.auto_tune:
+        if cfg.enable_diagnostics or cfg.auto_tune or cfg.auto_style:
             report("Autonomous Signal Diagnostics", 0.02)
             t0 = time.perf_counter()
             diag_result = diagnose_image(cur)
@@ -397,7 +398,17 @@ class PureScalePipeline:
 
         # Style DSP profile: fills fields still at library defaults from the
         # resolved style profile (explicit style_profile > sr_style). Runs
-        # after auto-tune so diagnosed values always win over the profile.
+        # after auto-tune and auto-style so diagnosed/routed values win.
+        if cfg.auto_style and diag_result is not None:
+            if diag_result.style_confidence >= AUTO_STYLE_CONFIDENCE:
+                suggested = diag_result.suggested_style
+                if suggested in ("photo", "anime"):
+                    # Weights exist for these: re-route only the default pin.
+                    if cfg.sr_style == "photo":
+                        cfg.sr_style = suggested
+                elif suggested == "manga" and cfg.style_profile is None:
+                    # No manga weights exist: DSP profile only, weights stay.
+                    cfg.style_profile = "manga"
         cfg = apply_style_profile(cfg)
 
         # -------------------------------------------------------------

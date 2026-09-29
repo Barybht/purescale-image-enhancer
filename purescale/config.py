@@ -21,7 +21,12 @@ __all__ = [
     "valid_sr_styles",
     "STYLE_PROFILES",
     "apply_style_profile",
+    "AUTO_STYLE_CONFIDENCE",
 ]
+
+
+# Minimum classification confidence for automatic style re-routing.
+AUTO_STYLE_CONFIDENCE: float = 0.60
 
 
 def valid_sr_styles() -> Tuple[str, ...]:
@@ -136,6 +141,12 @@ class PipelineConfig:
     # (flags, presets, constructor kwargs, auto-tune results) always win.
     style_profile: Optional[str] = None
 
+    # Content-Aware Style Auto-Detect: classify content (photo/anime/manga)
+    # and re-route weights/profile automatically at confidence >=
+    # AUTO_STYLE_CONFIDENCE. Explicit --style (non-default sr_style) always
+    # wins; manga content sets the DSP profile only (no manga weights exist).
+    auto_style: bool = False
+
     # Memory and Dimension Limits (8K OOM Guard)
     max_megapixels: float = 40.0
 
@@ -200,6 +211,10 @@ class PipelineConfig:
             raise ValueError(
                 f"Invalid enable_local_tone: {self.enable_local_tone!r}. Must be a boolean."
             )
+        if not isinstance(self.auto_style, bool):
+            raise ValueError(
+                f"Invalid auto_style: {self.auto_style!r}. Must be a boolean."
+            )
         if str(self.sr_style).lower() not in valid_sr_styles():
             raise ValueError(
                 f"Invalid sr_style: {self.sr_style!r}. Must be one of {list(valid_sr_styles())}."
@@ -245,6 +260,7 @@ class PipelineConfig:
             "enable_fast_2x": self.enable_fast_2x,
             "sr_style": self.sr_style,
             "style_profile": self.style_profile,
+            "auto_style": self.auto_style,
             "max_megapixels": self.max_megapixels,
             "output_format": self.output_format,
         }

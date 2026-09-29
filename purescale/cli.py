@@ -199,7 +199,8 @@ def main(args: List[str] = None) -> int:
     parser.add_argument("--list-devices", action="store_true", help="List detected accelerators and model cache status, then exit")
 
     # Autonomous Diagnostics
-    parser.add_argument("--auto", action="store_true", help="Enable autonomous diagnostic auto-tuning")
+    parser.add_argument("--auto", action="store_true", help="Enable autonomous diagnostic auto-tuning (implies diagnostics + style auto-detect)")
+    parser.add_argument("--auto-style", action="store_true", help="Auto-detect content style (photo/anime/manga) and re-route weights/profile")
     parser.add_argument("--diagnostics", action="store_true", help="Print signal diagnostics table without processing")
 
     # Mode & Hardware Target
@@ -378,6 +379,11 @@ def main(args: List[str] = None) -> int:
     cfg.auto_tune = parsed.auto
     if parsed.auto:
         # Auto-tuning needs diagnostics to compute recommendations.
+        cfg.enable_diagnostics = True
+        # One-click autonomy includes content style routing.
+        cfg.auto_style = True
+    if parsed.auto_style:
+        cfg.auto_style = True
         cfg.enable_diagnostics = True
     if parsed.dehaze is not None:
         cfg.enable_dehaze = parsed.dehaze > 0.0

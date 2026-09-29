@@ -921,6 +921,94 @@ class TestPureScale4StyleProfiles(unittest.TestCase):
             self.assertTrue(os.path.exists(dst))
 
 
+def _style_probe(kind: str) -> np.ndarray:
+    """Deterministic synthetic fixtures per content style."""
+    rng = np.random.default_rng(5)
+    if kind == "cartoon":
+        img = np.full((128, 128, 3), [255, 200, 150], np.uint8)
+        img[10:60, 10:60] = [80, 120, 220]
+        img[58:62, :] = 20
+        img[:, 58:62] = 20
+        return img
+    if kind == "manga":
+        yy, xx = np.mgrid[0:128, 0:128]
+        dots = (((xx % 4) < 2) & ((yy % 4) < 2)).astype(np.float32) * 150 + 50
+        gray = np.clip(dots + rng.normal(0, 4.0, dots.shape), 0, 255).astype(np.uint8)
+        return np.repeat(gray[:, :, np.newaxis], 3, axis=2)
+    if kind == "bw-photo":
+        wave = 120 + 60 * np.sin(np.linspace(0, 6, 128))[None, :, None]
+        return np.clip(wave + rng.normal(0, 5.0, (128, 128, 3)), 0, 255).astype(np.uint8)
+    # noisy photo gradient
+    x = np.linspace(0, 1, 128, dtype=np.float32)[None, :].repeat(128, axis=0)
+    base = np.stack([x * 180 + 30, x * 150 + 40, (1 - x) * 120 + 30], axis=-1)
+    return np.clip(base + rng.normal(0, 6.0, base.shape), 0, 255).astype(np.uint8)
+
+
+class TestPureScale4AutoStyle(unittest.TestCase):
+    """Tests content-aware style auto-detect (photo/anime/manga)."""
+
+    def test_classifier_probes(self):
+        from purescale.dsp.diagnostics import classify_content_style
+
+        style, conf = classify_content_style(_style_probe("cartoon"))
+        self.assertEqual(style, "anime")
+        self.assertGreaterEqual(conf, 0.60)
+
+        style, conf = classify_content_style(_style_probe("manga"))
+        self.assertEqual(style, "manga")
+        self.assertGreaterEqual(conf, 0.60)
+
+        style, conf = classify_content_style(_style_probe("photo"))
+        self.assertEqual(style, "photo")
+
+        # B&W photo without dots must not route to manga.
+        style, _ = classify_content_style(_style_probe("bw-photo"))
+        self.assertEqual(style, "photo")
+
+    def test_classifier_determinism(self):
+        from purescale.dsp.diagnostics import classify_content_style
+
+        for kind in ("cartoon", "manga", "photo"):
+            img = _style_probe(kind)
+            self.assertEqual(classify_content_style(img), classify_content_style(img))
+
+    def test_pipeline_manga_routing(self):
+        pipeline = PureScalePipeline()
+        cfg = PipelineConfig(mode=ProcessingMode.PURE_DSP, scale=1.0, auto_style=True)
+        res = pipeline.enhance(_style_probe("manga"), config=cfg)
+        self.assertEqual(res.diagnostics.suggested_style, "manga")
+        # Manga DSP profile applied: denoise + semantic stages skipped.
+        self.assertNotIn("swf_denoise", res.stage_latencies)
+        self.assertNotIn("semantic_parsing", res.stage_latencies)
+
+    def test_pipeline_anime_routing(self):
+        pipeline = PureScalePipeline()
+        cfg = PipelineConfig(mode=ProcessingMode.PURE_DSP, scale=1.0, auto_style=True)
+        res = pipeline.enhance(_style_probe("cartoon"), config=cfg)
+        self.assertEqual(res.diagnostics.suggested_style, "anime")
+
+    def test_explicit_style_pin_wins(self):
+        pipeline = PureScalePipeline()
+        cfg = PipelineConfig(mode=ProcessingMode.PURE_DSP, scale=1.0,
+                             sr_style="anime", auto_style=True)
+        res = pipeline.enhance(_style_probe("manga"), config=cfg)
+        self.assertEqual(res.diagnostics.suggested_style, "manga")
+        # Explicit anime pin kept for weights; manga DSP profile still applied.
+        self.assertNotIn("swf_denoise", res.stage_latencies)
+
+    def test_cli_auto_style_flag(self):
+        import tempfile
+        from purescale.cli import main
+
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "in.png")
+            dst = os.path.join(d, "out.png")
+            cv2.imwrite(src, _style_probe("manga"))
+            code = main([src, "-o", dst, "--auto-style", "--scale", "1.0"])
+            self.assertEqual(code, 0)
+            self.assertTrue(os.path.exists(dst))
+
+
 class TestPureScale4CodeIntegrity(unittest.TestCase):
     """Verifies complete absence of non-ASCII emojis across all codebase files."""
 
