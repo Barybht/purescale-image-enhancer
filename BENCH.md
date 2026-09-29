@@ -151,7 +151,9 @@ Measured on AMD Ryzen 5 PRO 7640HS (Zen 4 CPU, AVX-512 / AVX2):
 
 - **Quality gates** (`test_local_tone_proxy_consistency`): Exceeds gating
   thresholds (PSNR > 35 dB, SSIM > 0.98), achieving > 54 dB PSNR and > 0.998 SSIM
-  with 100% bitwise determinism ($L_\infty = 0$).
+  with 100% bitwise determinism ($L_\infty = 0$). Proxy latency is
+  resize-dominated, so faster hosts report a smaller speedup ratio at equal
+  or better quality.
 
 ---
 

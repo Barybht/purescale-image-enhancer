@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 import numpy as np
 
 # Canonical definition lives in purescale.dsp.diagnostics (re-exported here
@@ -18,10 +18,29 @@ __all__ = [
     "ProcessingResult",
     "PRESETS",
     "get_preset_config",
-    "VALID_SR_STYLES",
+    "valid_sr_styles",
 ]
 
-VALID_SR_STYLES = ("photo", "anime")
+
+def valid_sr_styles() -> Tuple[str, ...]:
+    """Styles with a registered super-resolution model in ``MODEL_REGISTRY``.
+
+    Derived live from the registry (deferred import: importing
+    ``purescale.neural`` at module top would cycle back through
+    ``purescale.config`` via the engine/device modules), so a newly
+    registered style is accepted without touching this file.
+    """
+    from purescale.neural.models import MODEL_REGISTRY
+
+    return tuple(
+        sorted(
+            {
+                str(v.get("style", "photo")).lower()
+                for v in MODEL_REGISTRY.values()
+                if v.get("task") == "super-resolution"
+            }
+        )
+    )
 
 
 class ProcessingMode(str, Enum):
@@ -174,9 +193,9 @@ class PipelineConfig:
             raise ValueError(
                 f"Invalid enable_local_tone: {self.enable_local_tone!r}. Must be a boolean."
             )
-        if str(self.sr_style).lower() not in VALID_SR_STYLES:
+        if str(self.sr_style).lower() not in valid_sr_styles():
             raise ValueError(
-                f"Invalid sr_style: {self.sr_style!r}. Must be one of {sorted(VALID_SR_STYLES)}."
+                f"Invalid sr_style: {self.sr_style!r}. Must be one of {list(valid_sr_styles())}."
             )
 
     def to_dict(self) -> Dict[str, Any]:

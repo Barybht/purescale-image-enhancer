@@ -31,8 +31,10 @@ def local_tone_mapping(
         highlight_recovery: Highlight shoulder compression and desaturation in [0.0, 1.0]
         shadow_boost: Shadow toe lifting intensity in [0.0, 1.0]
         proxy_max_dim: Maximum long-edge dimension for proxy guided-filter base
-            estimation. Proxy acceleration speeds up 720p/1080p by ~7-10x while
-            maintaining SSIM > 0.99 and PSNR > 50 dB. Set to 0 for full resolution.
+            estimation. Proxy acceleration gives ~1.6-2.2x at 720p/1080p on
+            reference hardware (proxy cost is resize-dominated, so faster
+            hosts see a smaller ratio) while maintaining SSIM > 0.998 and
+            PSNR > 54 dB. Set to 0 for full resolution.
 
     Returns:
         Tone-mapped uint8 BGR image [H, W, 3]
