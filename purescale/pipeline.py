@@ -20,7 +20,7 @@ from purescale.config import (
 from purescale.dsp.color import bradford_cat16_white_balance, oklab_vibrance
 from purescale.dsp.contrast import bimef_exposure_fusion, contrast_adaptive_sharpen
 from purescale.dsp.dehaze import atmospheric_dehaze
-from purescale.dsp.diagnostics import auto_tune_parameters, diagnose_image
+from purescale.dsp.diagnostics import diagnose_image
 from purescale.dsp.filters import side_window_filter
 from purescale.dsp.pyramid import multiscale_laplacian_filter
 from purescale.dsp.restore import directional_subpixel_depixelate, tensor_steered_shock_filter
