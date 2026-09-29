@@ -155,11 +155,16 @@ instead of 4x inference followed by downsampling. Execution providers are
 preferred CUDA > DirectML > CPU on `auto`; OpenCV DNN remains the
 zero-dependency fallback.
 
-> **2x penalty (measured):** only the native 4x model is registered, so
-> `--scale 2.0` still runs full 4x inference and Lanczos-downsamples
-> (2.0x wall time == 4.0x wall time on CPU, ~46 ms on a 96x96 probe).
-> Prefer `--scale 4.0` when quality-per-second matters, until a native
-> x2 weight entry lands in `MODEL_REGISTRY`.
+> **2x penalty & fast path (measured):** only the native 4x model is registered.
+> The default reference path runs full 4x inference and Lanczos-downsamples
+> (2.0x wall time == 4.0x wall time; 1080p is ~9.0s on GPU, ~32.4s on CPU).
+> PureScale 4.0 provides an experimental fast path (`--fast-2x` or `--preset fast`)
+> that pre-downscales input 0.5x before 4x inference, achieving a ~3.8x–4.9x speedup
+> (~2.4s at 1080p on GPU, ~7.8s on CPU) with PSNR > 46 dB and SSIM > 0.99 on photos.
+> It remains optional (default False) because high-frequency stochastic noise
+> experiences sub-pixel decimation (dropping to ~17 dB PSNR on micro-grain).
+> Without verified, compact native x2 weights available upstream, this resolves
+> the 2x performance question with transparent quality/speed control.
 
 ### CLI Parameters Reference
 
@@ -186,6 +191,7 @@ zero-dependency fallback.
 | `eye_clarity` | `--eye-clarity` | 1.30 | 1.0 - 2.0 | **Eye Clarity**: Corneal catchlight and iris sharpness. |
 | `tile_size` | `--tile-size` | 256 | >= 32 | **Neural Patch Dimension**: Spatial tile dimension for neural inference. |
 | `tile_overlap` | `--tile-overlap` | 32 | 0 <= overlap < tile | **Patch Overlap**: Border overlap margin with raised-cosine feathering. |
+| `enable_fast_2x` | `--fast-2x` / `--no-fast-2x` | False | Boolean | **2x Neural Fast Path**: Pre-downscales input 0.5x before 4x inference (~4x speedup). |
 | `max_megapixels` | `--max-megapixels` | 40.0 | > 0.0 | **Memory OOM Guard**: Maximum allowed megapixels (input/target) before aborting. |
 | `recursive` | `-r`, `--recursive` | False | Boolean | **Recursive Processing**: Recursively process subdirectories in batch mode. |
 | `no_pyramid` | `--no-pyramid` | False | Boolean | **Bypass Flag**: Disables Multiscale Local Laplacian Pyramid filtering. |

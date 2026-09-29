@@ -254,6 +254,20 @@ def main(args: List[str] = None) -> int:
     parser.add_argument("--eye-clarity", type=float, default=None, help="Corneal catchlight & iris sharpness (1.0-2.0)")
     parser.add_argument("--tile-size", type=int, default=None, help="Tile dimension for neural super-resolution (>= 32)")
     parser.add_argument("--tile-overlap", type=int, default=None, help="Tile overlap border margin (>= 0 and < tile-size)")
+    parser.add_argument(
+        "--fast-2x",
+        dest="fast_2x",
+        action="store_true",
+        default=None,
+        help="Enable experimental 2x neural fast path (0.5x pre-downscale + 4x inference)",
+    )
+    parser.add_argument(
+        "--no-fast-2x",
+        dest="fast_2x",
+        action="store_false",
+        default=None,
+        help="Disable 2x neural fast path (run full 4x inference then downsample)",
+    )
     parser.add_argument("--max-megapixels", type=float, default=None, help="Maximum image megapixels allowed before OOM guard aborts (default: 40.0)")
     parser.add_argument("--reference", default=None, help="Path to ground-truth image for PSNR/SSIM quality scoring (shapes must match output)")
     parser.add_argument("-r", "--recursive", action="store_true", help="Recursively process subdirectories in input directory")
@@ -372,6 +386,8 @@ def main(args: List[str] = None) -> int:
         cfg.tile_size = parsed.tile_size
     if parsed.tile_overlap is not None:
         cfg.tile_overlap = parsed.tile_overlap
+    if parsed.fast_2x is not None:
+        cfg.enable_fast_2x = parsed.fast_2x
     if parsed.max_megapixels is not None:
         cfg.max_megapixels = parsed.max_megapixels
     cfg.output_format = parsed.format

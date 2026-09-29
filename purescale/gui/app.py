@@ -335,7 +335,9 @@ class PureScaleApp(ctk.CTk):
         self.semantic_switch.pack(anchor="w", padx=12, pady=(2, 2))
         self.contrast_switch = ctk.CTkSwitch(perf_card, text="BIMEF Dynamic Range Fusion", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
         self.contrast_switch.select()
-        self.contrast_switch.pack(anchor="w", padx=12, pady=(2, 4))
+        self.contrast_switch.pack(anchor="w", padx=12, pady=(2, 2))
+        self.fast_2x_switch = ctk.CTkSwitch(perf_card, text="2x Neural Fast Path", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
+        self.fast_2x_switch.pack(anchor="w", padx=12, pady=(2, 4))
 
         # 3. Multiscale Local Laplacian Pyramid Card
         pyramid_card = ParameterCard(
@@ -599,6 +601,10 @@ class PureScaleApp(ctk.CTk):
             self.contrast_switch.select()
         else:
             self.contrast_switch.deselect()
+        if getattr(cfg, "enable_fast_2x", False):
+            self.fast_2x_switch.select()
+        else:
+            self.fast_2x_switch.deselect()
 
     def _on_view_mode_change(self, mode_str: str) -> None:
         """Updates interactive canvas rendering mode."""
@@ -749,6 +755,7 @@ class PureScaleApp(ctk.CTk):
             deblur_strength=int(self.deblur_slider.get()),
             portrait_smooth=int(self.smooth_slider.get()),
             eye_clarity=self.eye_slider.get(),
+            enable_fast_2x=bool(self.fast_2x_switch.get()),
             output_format=self.fmt_seg.get(),
         )
         return cfg

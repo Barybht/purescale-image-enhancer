@@ -98,6 +98,7 @@ class PipelineConfig:
     # Neural AI Execution Settings
     tile_size: int = 256
     tile_overlap: int = 32
+    enable_fast_2x: bool = False
 
     # Memory and Dimension Limits (8K OOM Guard)
     max_megapixels: float = 40.0
@@ -152,6 +153,10 @@ class PipelineConfig:
             raise ValueError(
                 f"Invalid output_format: {self.output_format!r}. Must be PNG, JPEG, or WebP."
             )
+        if not isinstance(self.enable_fast_2x, bool):
+            raise ValueError(
+                f"Invalid enable_fast_2x: {self.enable_fast_2x!r}. Must be a boolean."
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         """Converts config to dictionary representation."""
@@ -182,6 +187,7 @@ class PipelineConfig:
             "eye_clarity": self.eye_clarity,
             "tile_size": self.tile_size,
             "tile_overlap": self.tile_overlap,
+            "enable_fast_2x": self.enable_fast_2x,
             "max_megapixels": self.max_megapixels,
             "output_format": self.output_format,
         }
@@ -318,6 +324,7 @@ PRESETS: Dict[str, Dict[str, Any]] = {
         "pyramid_structure_boost": 1.0,
         "pyramid_dynamic_range": 0.0,
         "enable_semantic_guidance": False,
+        "enable_fast_2x": True,
     },
 }
 

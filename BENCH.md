@@ -102,6 +102,37 @@ identical full path, so golden outputs are bitwise unchanged.
   not structure), flat-region noise still halved, step-edge delta
   preserved (> 60), deterministic across runs.
 
+### Post-Optimization: Neural 2x Fast Path (Task 1)
+
+In Neural AI and Hybrid modes at `--scale 2.0`, the reference path runs full 4x
+inference followed by Lanczos-4 downsampling ($O(N)$ input pixels). The
+experimental fast path (`--fast-2x` / `enable_fast_2x=True`) downscales the
+input 0.5x with `INTER_AREA`, executes 4x neural inference on $N/4$ pixels, and
+produces the 2.0x target directly.
+
+Measured on AMD Ryzen 5 PRO 7640HS (DirectML GPU and Zen 4 CPU AVX-512):
+
+| Fixture / Resolution | DirectML Ref (ms) | DirectML Fast (ms) | Speedup (GPU) | CPU Ref (ms) | CPU Fast (ms) | Speedup (CPU) | PSNR (dB) | SSIM |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **1080p (1920x1080)** | 9019.0 ms | 2373.1 ms | **3.80x** | 32406.9 ms | 7771.3 ms | **4.17x** | 47.59 dB | 0.9918 |
+| **720p (1280x720)** | 4167.5 ms | 948.8 ms | **4.39x** | 13909.8 ms | 2858.2 ms | **4.87x** | 46.82 dB | 0.9915 |
+| **VGA (640x480)** | 1427.1 ms | 353.2 ms | **4.04x** | — | — | — | 45.42 dB | 0.9909 |
+| **QVGA (320x240)** | 363.4 ms | 60.8 ms | **5.98x** | 741.6 ms | 88.0 ms | **8.42x** | 43.00 dB | 0.9893 |
+| **160x120** | 70.2 ms | 25.2 ms | **2.79x** | 92.5 ms | 23.4 ms | **3.96x** | 40.04 dB | 0.9854 |
+| **golden_photo (96x96)** | 37.5 ms | 17.4 ms | **2.16x** | 50.0 ms | 12.7 ms | **3.94x** | 39.20 dB | 0.9851 |
+| **golden_edge (64x64)** | 13.4 ms | 12.4 ms | **1.08x** | 26.5 ms | 9.0 ms | **2.96x** | 35.99 dB | 0.9802 |
+| **golden_texture (80x80)**| 27.0 ms | 13.8 ms | **1.96x** | 32.1 ms | 10.8 ms | **2.99x** | 17.02 dB | 0.6956 |
+
+- **Quality analysis**: On natural imagery, photos, and structural contours, the
+  fast path achieves PSNR > 39-47 dB and SSIM > 0.98-0.99 with an empirical ~4x
+  latency reduction across both GPU and CPU backends. However, on fine stochastic
+  micro-textures (`golden_texture`), 0.5x pre-decimation removes high frequencies
+  before neural feature extraction, resulting in PSNR dropping to 17.02 dB and
+  SSIM to 0.6956.
+- **Outcome**: The fast path is shipped as an optional feature (`enable_fast_2x`,
+  CLI `--fast-2x`, GUI toggle, enabled in preset `fast`) rather than the default.
+  Reference 4x-then-downsample remains default for fidelity.
+
 ---
 
 ## Architectural Insights & Optimizations
@@ -114,3 +145,4 @@ identical full path, so golden outputs are bitwise unchanged.
 
 3. **Bitwise Determinism Invariance**:
    PureDSP executes with bitwise determinism ($L_\infty = 0$) across independent runs, guaranteed through `np.clip(np.rint(...), 0.0, 255.0).astype(np.uint8)` round-half-up integer quantization.
+

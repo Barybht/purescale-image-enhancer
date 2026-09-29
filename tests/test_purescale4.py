@@ -317,6 +317,7 @@ class TestPureScale4Pipeline(unittest.TestCase):
             {"deblur_strength": 101}, {"portrait_smooth": 101},
             {"eye_clarity": 0.9}, {"eye_clarity": 2.1},
             {"output_format": "TIFF"},
+            {"enable_fast_2x": "invalid"},
         ):
             with self.subTest(kwargs=kwargs):
                 with self.assertRaises(ValueError):
@@ -413,6 +414,15 @@ class TestPureScale4CliAndGui(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(os.path.exists(self.temp_out))
 
+    def test_cli_fast_2x_flags(self):
+        from purescale.cli import main
+        code = main([self.temp_in, "-o", self.temp_out, "--fast-2x", "--scale", "2.0"])
+        self.assertEqual(code, 0)
+        self.assertTrue(os.path.exists(self.temp_out))
+
+        code = main([self.temp_in, "-o", self.temp_out, "--preset", "fast", "--no-fast-2x"])
+        self.assertEqual(code, 0)
+
     def test_headless_gui(self):
         if not _TK_AVAILABLE:
             self.skipTest("tkinter not available on this runner")
@@ -429,6 +439,10 @@ class TestPureScale4CliAndGui(unittest.TestCase):
             app._on_preset_change("Landscape")
             self.assertTrue(app.dehaze_switch.get())
             self.assertAlmostEqual(app.dehaze_slider.get(), 0.6)
+            self.assertFalse(app.fast_2x_switch.get())
+
+            app._on_preset_change("Fast")
+            self.assertTrue(app.fast_2x_switch.get())
 
             # Test HUD update
             from purescale.dsp.diagnostics import diagnose_image
@@ -560,6 +574,29 @@ class TestPureScale4NeuralIntegration(unittest.TestCase):
         self.assertEqual(out.shape, (64, 64, 3))
         self.assertEqual(out.dtype, np.uint8)
         self.assertGreater(float(np.mean(out)), 0.0)
+
+    def test_neural_fast_2x_proxy_consistency(self):
+        from purescale.neural.engine import NeuralSuperResEngine
+        from purescale.neural.models import get_default_model_path
+        from purescale.quality import compare_images
+
+        model_path = get_default_model_path(auto_download=False)
+        if not model_path or not os.path.exists(model_path):
+            self.skipTest("Neural super-resolution model weights not downloaded locally.")
+
+        engine = NeuralSuperResEngine(model_path=model_path, target_device=DeviceTarget.CPU)
+        ref = engine.upscale(self.patch, target_scale=2.0, tile_size=32, tile_overlap=4, fast_2x=False)
+        fast = engine.upscale(self.patch, target_scale=2.0, tile_size=32, tile_overlap=4, fast_2x=True)
+
+        self.assertEqual(ref.shape, (64, 64, 3))
+        self.assertEqual(fast.shape, (64, 64, 3))
+
+        metrics = compare_images(ref, fast)
+        self.assertGreater(metrics["psnr_db"], 25.0)
+        self.assertGreater(metrics["ssim"], 0.90)
+
+        again = engine.upscale(self.patch, target_scale=2.0, tile_size=32, tile_overlap=4, fast_2x=True)
+        self.assertTrue(np.array_equal(fast, again))
 
     def test_portrait_retoucher_inference(self):
         from purescale.neural.portrait import PortraitRetoucher

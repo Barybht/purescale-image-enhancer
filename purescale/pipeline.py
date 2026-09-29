@@ -278,6 +278,7 @@ class PureScalePipeline:
             target_scale=cfg.scale,
             tile_size=cfg.tile_size,
             tile_overlap=cfg.tile_overlap,
+            fast_2x=cfg.enable_fast_2x,
         )
         if alpha is not None:
             alpha = cv2.resize(alpha, (dest_w, dest_h), interpolation=cv2.INTER_LANCZOS4)
