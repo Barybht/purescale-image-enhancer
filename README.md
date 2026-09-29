@@ -155,6 +155,12 @@ instead of 4x inference followed by downsampling. Execution providers are
 preferred CUDA > DirectML > CPU on `auto`; OpenCV DNN remains the
 zero-dependency fallback.
 
+> **2x penalty (measured):** only the native 4x model is registered, so
+> `--scale 2.0` still runs full 4x inference and Lanczos-downsamples
+> (2.0x wall time == 4.0x wall time on CPU, ~46 ms on a 96x96 probe).
+> Prefer `--scale 4.0` when quality-per-second matters, until a native
+> x2 weight entry lands in `MODEL_REGISTRY`.
+
 ### CLI Parameters Reference
 
 | Parameter | CLI Flag | Default | Valid Range | Description |

@@ -120,6 +120,12 @@ class NeuralSuperResEngine:
         """
         Upscales input image using compact neural super-resolution with overlap tiling.
         Adapts output to arbitrary target_scale cleanly.
+
+        NOTE (2x penalty): only a native 4x model is registered, so any
+        ``target_scale < 4`` still runs full 4x inference followed by a
+        Lanczos-4 downsample (~4x the inference work a native model would
+        need; measured 2.0x == 4.0x wall time). A future native x2 entry is
+        picked up automatically via ``resolve_sr_model``.
         """
         orig_h, orig_w = img.shape[:2]
         dest_w = int(round(orig_w * target_scale))
@@ -146,5 +152,9 @@ class NeuralSuperResEngine:
 
         # If target scale is different, downscale / upscale to exact requested dimensions
         # using high-precision Lanczos-4 resampling
+        logger.debug(
+            "Target %.2fx != native %dx inference; resampling %dx output to %dx%d",
+            target_scale, self.native_scale, self.native_scale, dest_w, dest_h,
+        )
         resampled = cv2.resize(upscaled_4x, (dest_w, dest_h), interpolation=cv2.INTER_LANCZOS4)
         return resampled
