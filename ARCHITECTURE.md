@@ -12,7 +12,7 @@ PureScale 4.0 unifies:
 5. **Multi-Cue Semantic Region Guidance**: Soft continuous probability masks for Sky, Foliage, Skin, Shadow, and Structure.
 6. **Dual Hardware Acceleration**: Microsoft DirectML (DirectX 12) for AMD Radeon GPU neural execution and Zen 4 CPU AVX-512 SIMD for analytical DSP.
 
-Evaluated on commodity laptop hardware (AMD Ryzen 5 PRO 7640HS + Radeon 760M iGPU), PureScale 4.0 processes 1080p imagery to 4K super-resolution in $\sim 35\text{ ms}$ in PureDSP mode with 100% bitwise determinism and zero hallucination risk.
+Evaluated on commodity laptop hardware (AMD Ryzen 5 PRO 7640HS + Radeon 760M iGPU), PureScale 4.0 processes 1080p imagery in $\sim 2.0\text{ s}$ in PureDSP mode at 1.0x scale ($\sim 5\text{ s}$ at 2.0x scale to 4K, see `BENCH.md` and `bench/bench.py`) with 100% bitwise determinism and zero hallucination risk.
 
 ---
 
@@ -217,21 +217,21 @@ PureScale 4.0 deploys a dual-engine hardware acceleration layer:
 1. **Microsoft DirectML (DirectX 12)**: Dispatches neural tensor graphs (`Conv2D`, `PReLU`, `PixelShuffle`) directly to modern GPU compute units (such as AMD Radeon 760M / RDNA 3).
 2. **Zen 4 AVX-512 / AVX2 Vector Extensions**: Dispatches DSP primitives (SWF, EASU, CAS, BIMEF, Pyramids, Dehaze, Oklab) across vector SIMD registers with cache-friendly row-major memory traversal.
 
-| Pipeline Stage | Engine | Asymptotic Complexity | Hardware Target | Latency (1080p, balanced) |
+| Pipeline Stage | Engine | Asymptotic Complexity | Hardware Target | Latency (1080p input, balanced, 1.0x unless noted) |
 | :--- | :--- | :--- | :--- | :--- |
 | **Diagnostics (Stage -1)** | Analytical Wavelet | $O(N)$ | Zen 4 CPU AVX-512 | ~90 ms |
 | **Semantic Parsing (-0.5)**| Multi-Cue Guided | $O(N)$ | Zen 4 CPU AVX-512 | ~174 ms |
 | **Shock Deblur (Stage 0)** | Structure Tensor | $O(N)$ | Zen 4 CPU AVX-512 | — (off by default) |
 | **Dehaze (Stage 1)** | Dark Channel Guided | $O(N)$ | Zen 4 CPU AVX-512 | — (off by default; ~218 ms at 0.65) |
-| **EASU Super-Res (Stage 2)**| Anisotropic Sinc | $O(s^2 N)$ | Zen 4 CPU AVX-512 | ~522 ms (1080p → 4K) |
+| **EASU Super-Res (Stage 2)**| Anisotropic Sinc | $O(s^2 N)$ | Zen 4 CPU AVX-512 | ~522 ms (only at 2.0x scale, 1080p → 4K; excluded from 1.0x total) |
 | **Multiscale Pyramids (3)** | 4-Octave Laplacian | $O(N)$ | Zen 4 CPU AVX-512 | ~96 ms |
 | **BIMEF Dynamic Range (4)**| Anchored S-Curve | $O(N)$ | Zen 4 CPU AVX-512 | ~186 ms |
 | **CAS Sharpening (Stage 5)**| Bound-Clamped CAS | $O(N)$ | Zen 4 CPU AVX-512 | ~228 ms |
 | **Oklab Vibrance (Stage 6)**| LMS Photoreceptor | $O(N)$ | Zen 4 CPU AVX-512 | ~306 ms |
 | **Bradford CAT16 (Stage 7)**| Von Kries Transform | $O(N)$ | Zen 4 CPU AVX-512 | — (off by default) |
-| **PureDSP Mode (Total)** | Complete Analytical | $O(N)$ | AMD Zen 4 CPU | **~2.0 s** |
-| **Neural AI Mode (Total)** | 6-Block CNN + Pyramids | $O(\text{CNN}) + O(N)$ | AMD Radeon 760M (DirectML) | **~360 ms** |
-| **Hybrid Mode (Total)** | AI + Multiscale DSP | $O(\text{CNN}) + O(N)$ | DirectML GPU + Zen CPU | **~420 ms** |
+| **PureDSP Mode (Total)** | Complete Analytical | $O(N)$ | AMD Zen 4 CPU | **~2.0 s at 1.0x; ~5.0 s at 2.0x to 4K** |
+| **Neural AI Mode (Total)** | 6-Block CNN + Pyramids | $O(\text{CNN}) + O(N)$ | AMD Radeon 760M (DirectML) | **~360 ms (DirectML-GPU estimate, pending re-measurement)** |
+| **Hybrid Mode (Total)** | AI + Multiscale DSP | $O(\text{CNN}) + O(N)$ | DirectML GPU + Zen CPU | **~420 ms (DirectML-GPU estimate, pending re-measurement)** |
 
 ---
 

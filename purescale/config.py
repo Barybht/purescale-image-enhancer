@@ -23,7 +23,7 @@ __all__ = [
 
 class ProcessingMode(str, Enum):
     """Execution mode selection."""
-    PURE_DSP = "puredsp"       # 100% deterministic, zero neural weights, ~45ms
+    PURE_DSP = "puredsp"       # 100% deterministic, zero neural weights
     NEURAL_AI = "neural"       # Compact ~4.87MB ONNX model edge super-resolution
     HYBRID = "hybrid"          # Neural AI edge synthesis + Multiscale Laplacian & Perceptual DSP
 
@@ -45,8 +45,10 @@ class PipelineConfig:
     device: DeviceTarget = DeviceTarget.AUTO
 
     # Autonomous Diagnostics & Auto-Tuning
-    # Heavy stages (~35ms on VGA combined). The `fast` preset disables both;
-    # `--auto` re-enables diagnostics regardless to compute recommendations.
+    # Heavy stages (tens of ms on VGA combined, ~90+175 ms at 1080p per
+    # BENCH.md; see bench/bench.py for current figures). The `fast` preset
+    # disables both; `--auto` re-enables diagnostics regardless to compute
+    # recommendations.
     enable_diagnostics: bool = True
     auto_tune: bool = False
 

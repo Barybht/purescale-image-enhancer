@@ -6,7 +6,7 @@
 [![DirectML](https://img.shields.io/badge/DirectML-GPU%20Accelerated-0078D4?style=flat-square&logo=windows&logoColor=white)](https://github.com/microsoft/DirectML)
 [![NumPy](https://img.shields.io/badge/NumPy-Vectorized-013243?style=flat-square&logo=numpy&logoColor=white)](https://numpy.org/)
 [![Hardware](https://img.shields.io/badge/Hardware-DirectML%20GPU%20%2B%20AVX512%20CPU-24292e?style=flat-square&logo=amd&logoColor=white)](https://github.com/)
-[![Latency](https://img.shields.io/badge/Latency-~2s%20(1080p%20PureDSP)-blue?style=flat-square)](BENCH.md)
+[![Latency](https://img.shields.io/badge/Latency-~2s%20(1080p%20PureDSP%201.0x)-blue?style=flat-square)](BENCH.md)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
 PureScale 4.0 is an autonomous, multiscale computational vision and edge neural restoration engine. It unifies physical signal diagnostics, Dark Channel Prior atmospheric dehazing, 4-octave Local Laplacian pyramid filtering, soft semantic region guidance, and lightweight edge neural super-resolution (Real-ESRGAN Compact) with hardware acceleration across AMD Radeon GPUs and Zen CPUs.
