@@ -167,6 +167,19 @@ remains the zero-dependency fallback.
 > Without verified, compact native x2 weights available upstream, this resolves
 > the 2x performance question with transparent quality/speed control.
 
+### Style DSP Profiles
+
+`--style` selects neural weights; the matching DSP profile follows
+automatically, filling only parameters still at library defaults
+(explicit flags, presets, and auto-tune results always win).
+`--style-profile` overrides the DSP profile independently of weights.
+
+| Profile | Follows | Key differences from photo defaults |
+| :--- | :--- | :--- |
+| `photo` | `--style photo` | None (baseline behavior, bitwise identical to unprofiled runs). |
+| `anime` | `--style anime` | Lighter denoise (25), restrained sharpening (0.8) and micro-texture (1.05) to protect ink lines, structure bias (1.15), portrait retouch off (landmark detectors misfire on illustrated faces). |
+| `manga` | `--style-profile manga` (no manga weights exist yet; anime weights stand in) | Denoise off (screentones survive), contrast fusion off, flat micro-texture (1.0), gentle sharpening (0.7), semantic guidance and local tone off. |
+
 ### CLI Parameters Reference
 
 | Parameter | CLI Flag | Default | Valid Range | Description |
@@ -175,7 +188,8 @@ remains the zero-dependency fallback.
 | `diagnostics` | `--diagnostics` | False | Boolean | **Signal Diagnostics**: Prints formatted ASCII telemetry table without processing. |
 | `mode` | `--mode` | `puredsp` | `puredsp`, `neural`, `hybrid` | **Execution Engine**: Analytical DSP, Neural AI, or Hybrid mode. |
 | `device` | `--device` | `auto` | `auto`, `directml`, `cuda`, `cpu`, `opencv` | **Hardware Accelerator**: CUDA > DirectML > CPU auto-select, or forced backend (OpenCV DNN needs zero extra deps). |
-| `sr_style` | `--style` | `photo` | `photo`, `anime` | **Super-Resolution Style**: Model style selection (`photo` for general images, `anime` for illustrations). |
+| `sr_style` | `--style` | `photo` | registry styles | **Super-Resolution Style**: Neural weights + DSP profile family (`photo` for general images, `anime` for illustrations). |
+| `style_profile` | `--style-profile` | follows style | `photo`, `anime`, `manga` | **DSP Profile Override**: Style parameter profile independent of neural weights (`manga` has DSP tuning but no dedicated weights yet). |
 | `preset` | `-p`, `--preset` | None | `balanced`, `portrait`, `landscape`, `low-light`, `art`, `manga`, `fast` | **Parameter Profile**: Loads pre-tuned empirical parameter profiles (`manga` preserves halftone screentones with denoise off; `art` uses anime style; `fast` skips heavy stages). |
 | `dehaze` | `--dehaze` | 0.0 | 0.0 - 1.0 | **Atmospheric Dehaze**: Dark Channel Prior (DCP) fog/haze removal strength. |
 | `pyramid_detail` | `--pyramid-detail` | 1.20 | 0.5 - 2.0 | **Micro-Texture Gain**: Multiscale Local Laplacian octave band L1 detail boost. |

@@ -16,6 +16,7 @@ from purescale.config import (
     PipelineConfig,
     ProcessingMode,
     ProcessingResult,
+    apply_style_profile,
 )
 from purescale.dsp.color import bradford_cat16_white_balance, oklab_vibrance
 from purescale.dsp.contrast import bimef_exposure_fusion, contrast_adaptive_sharpen
@@ -393,6 +394,11 @@ class PureScalePipeline:
                 for k, v in diag_result.recommended_parameters.items():
                     if hasattr(cfg, k):
                         setattr(cfg, k, v)
+
+        # Style DSP profile: fills fields still at library defaults from the
+        # resolved style profile (explicit style_profile > sr_style). Runs
+        # after auto-tune so diagnosed values always win over the profile.
+        cfg = apply_style_profile(cfg)
 
         # -------------------------------------------------------------
         # STAGE -0.5: MULTI-CUE SEMANTIC REGION PARSING

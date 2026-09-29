@@ -19,6 +19,8 @@ __all__ = [
     "PRESETS",
     "get_preset_config",
     "valid_sr_styles",
+    "STYLE_PROFILES",
+    "apply_style_profile",
 ]
 
 
@@ -129,6 +131,11 @@ class PipelineConfig:
     enable_fast_2x: bool = False
     sr_style: str = "photo"
 
+    # Style DSP Profile: explicit profile name, or None to follow sr_style.
+    # A profile fills DSP fields still at library defaults; explicit values
+    # (flags, presets, constructor kwargs, auto-tune results) always win.
+    style_profile: Optional[str] = None
+
     # Memory and Dimension Limits (8K OOM Guard)
     max_megapixels: float = 40.0
 
@@ -197,6 +204,10 @@ class PipelineConfig:
             raise ValueError(
                 f"Invalid sr_style: {self.sr_style!r}. Must be one of {list(valid_sr_styles())}."
             )
+        if self.style_profile is not None and str(self.style_profile).lower() not in STYLE_PROFILES:
+            raise ValueError(
+                f"Invalid style_profile: {self.style_profile!r}. Must be one of {sorted(STYLE_PROFILES)}."
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         """Converts config to dictionary representation."""
@@ -233,9 +244,76 @@ class PipelineConfig:
             "tile_overlap": self.tile_overlap,
             "enable_fast_2x": self.enable_fast_2x,
             "sr_style": self.sr_style,
+            "style_profile": self.style_profile,
             "max_megapixels": self.max_megapixels,
             "output_format": self.output_format,
         }
+
+
+# Style-bound DSP profiles: per-style parameter overlays applied to fields
+# still at library defaults (see apply_style_profile). "photo" is empty by
+# definition, so the default path is byte-identical to unprofiled runs.
+STYLE_PROFILES: Dict[str, Dict[str, Any]] = {
+    "photo": {},
+    "anime": {
+        # Flat color needs less cleaning; ink lines halo easily, so keep
+        # sharpening and micro-texture restrained, structure firm.
+        "enable_denoise": True,
+        "denoise_intensity": 25,
+        "pyramid_micro_texture": 1.05,
+        "pyramid_structure_boost": 1.15,
+        "sharpen_strength": 0.8,
+        "contrast_boost": 1.5,
+        "vibrance_boost": 1.08,
+        # Face-landmark retouch misfires on illustrated faces: off.
+        "portrait_smooth": 0,
+        "eye_clarity": 1.0,
+    },
+    "manga": {
+        # Halftone dots read as noise to SWF: denoise off, texture flat,
+        # gentle sharpening to keep ink edges crisp without halos.
+        "enable_denoise": False,
+        "denoise_intensity": 15,
+        "enable_contrast": False,
+        "contrast_boost": 1.0,
+        "vibrance_boost": 1.0,
+        "pyramid_micro_texture": 1.0,
+        "pyramid_structure_boost": 1.05,
+        "sharpen_strength": 0.7,
+        "enable_semantic_guidance": False,
+        "enable_local_tone": False,
+        "portrait_smooth": 0,
+        "eye_clarity": 1.0,
+    },
+}
+
+
+def apply_style_profile(cfg: "PipelineConfig") -> "PipelineConfig":
+    """Returns a copy of ``cfg`` with the resolved style profile applied.
+
+    Resolution: explicit ``style_profile`` wins, else ``sr_style``. Profile
+    values fill only DSP fields still equal to library defaults, so explicit
+    values (CLI flags, presets, constructor kwargs, auto-tune results)
+    always win. Unknown profile names raise ``ValueError``.
+    """
+    from copy import deepcopy
+
+    profile_name = cfg.style_profile if cfg.style_profile is not None else cfg.sr_style
+    key = str(profile_name).lower()
+    if key not in STYLE_PROFILES:
+        raise ValueError(
+            f"Unknown style profile: {profile_name!r}. Available: {sorted(STYLE_PROFILES)}"
+        )
+    profile = STYLE_PROFILES[key]
+    if not profile:
+        return cfg
+    defaults = PipelineConfig()
+    out = deepcopy(cfg)
+    for field_name, value in profile.items():
+        if getattr(out, field_name) == getattr(defaults, field_name):
+            setattr(out, field_name, value)
+    out.validate()
+    return out
 
 
 @dataclass

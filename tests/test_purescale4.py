@@ -831,6 +831,96 @@ class TestPureScale4NeuralIntegration(unittest.TestCase):
         self.assertGreater(res.latency_ms, 0.0)
 
 
+class TestPureScale4StyleProfiles(unittest.TestCase):
+    """Tests style-bound DSP profiles (photo/anime/manga)."""
+
+    def test_profile_fills_defaults(self):
+        from purescale.config import apply_style_profile
+
+        anime = apply_style_profile(PipelineConfig(sr_style="anime"))
+        self.assertEqual(anime.sharpen_strength, 0.8)
+        self.assertEqual(anime.denoise_intensity, 25)
+        self.assertEqual(anime.portrait_smooth, 0)
+        self.assertEqual(anime.eye_clarity, 1.0)
+        self.assertEqual(anime.pyramid_micro_texture, 1.05)
+
+        manga = apply_style_profile(PipelineConfig(style_profile="manga"))
+        self.assertFalse(manga.enable_denoise)
+        self.assertFalse(manga.enable_contrast)
+        self.assertEqual(manga.sharpen_strength, 0.7)
+
+    def test_explicit_values_win(self):
+        from purescale.config import apply_style_profile
+
+        cfg = apply_style_profile(PipelineConfig(sr_style="anime", sharpen_strength=2.0))
+        self.assertEqual(cfg.sharpen_strength, 2.0)
+        # Unmentioned fields still filled from the profile.
+        self.assertEqual(cfg.denoise_intensity, 25)
+
+        # Explicit style_profile beats sr_style routing.
+        cfg = apply_style_profile(PipelineConfig(sr_style="photo", style_profile="manga"))
+        self.assertFalse(cfg.enable_denoise)
+
+    def test_unknown_profile_raises(self):
+        with self.assertRaises(ValueError):
+            PipelineConfig(style_profile="nope")
+
+    def test_photo_profile_byte_identical(self):
+        pipeline = PureScalePipeline()
+        np.random.seed(7)
+        img = np.random.randint(40, 220, (64, 64, 3), dtype=np.uint8)
+        base = PipelineConfig(mode=ProcessingMode.PURE_DSP, scale=1.0)
+        styled = PipelineConfig(mode=ProcessingMode.PURE_DSP, scale=1.0, sr_style="photo")
+        self.assertTrue(np.array_equal(
+            pipeline.enhance(img, config=base).image,
+            pipeline.enhance(img, config=styled).image,
+        ))
+
+    def test_manga_preserves_halftone_direction(self):
+        pipeline = PureScalePipeline()
+        # Fine halftone dots (4px period, print-realistic pitch): photo DSP
+        # reads them as noise and smooths them, manga profile must keep them.
+        yy, xx = np.mgrid[0:96, 0:96]
+        dots = (((xx % 4) < 2) & ((yy % 4) < 2)).astype(np.float32) * 120 + 60
+        rng = np.random.default_rng(9)
+        halftone = np.clip(dots + rng.normal(0, 5.0, dots.shape), 0, 255).astype(np.uint8)
+        halftone = np.repeat(halftone[:, :, np.newaxis], 3, axis=2)
+
+        def dot_energy(out: np.ndarray) -> float:
+            g = cv2.cvtColor(out, cv2.COLOR_BGR2GRAY).astype(np.float32)
+            return float((g - cv2.GaussianBlur(g, (9, 9), 2.0)).std())
+
+        photo_cfg = PipelineConfig(mode=ProcessingMode.PURE_DSP, scale=1.0)
+        manga_cfg = PipelineConfig(mode=ProcessingMode.PURE_DSP, scale=1.0, style_profile="manga")
+        out_photo = pipeline.enhance(halftone, config=photo_cfg).image
+        out_manga = pipeline.enhance(halftone, config=manga_cfg).image
+        # Manga profile must preserve more dot-scale energy than photo DSP.
+        self.assertGreater(dot_energy(out_manga), dot_energy(out_photo) * 1.2)
+
+    def test_style_determinism(self):
+        pipeline = PureScalePipeline()
+        np.random.seed(11)
+        img = np.random.randint(40, 220, (64, 64, 3), dtype=np.uint8)
+        cfg = PipelineConfig(mode=ProcessingMode.PURE_DSP, scale=1.0, sr_style="anime")
+        self.assertTrue(np.array_equal(
+            pipeline.enhance(img, config=cfg).image,
+            pipeline.enhance(img, config=cfg).image,
+        ))
+
+    def test_cli_style_profile_flag(self):
+        import tempfile
+        from purescale.cli import main
+
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "in.png")
+            dst = os.path.join(d, "out.png")
+            cv2.imwrite(src, np.full((48, 48, 3), 128, dtype=np.uint8))
+            code = main([src, "-o", dst, "--style-profile", "manga",
+                         "--scale", "1.0", "--preset", "fast"])
+            self.assertEqual(code, 0)
+            self.assertTrue(os.path.exists(dst))
+
+
 class TestPureScale4CodeIntegrity(unittest.TestCase):
     """Verifies complete absence of non-ASCII emojis across all codebase files."""
 

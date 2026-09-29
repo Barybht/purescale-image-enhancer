@@ -16,7 +16,9 @@ from purescale.config import (
     PipelineConfig,
     ProcessingMode,
     PRESETS,
+    STYLE_PROFILES,
     get_preset_config,
+    valid_sr_styles,
 )
 from purescale.dsp.diagnostics import diagnose_image
 from purescale.pipeline import PureScalePipeline
@@ -215,9 +217,15 @@ def main(args: List[str] = None) -> int:
     )
     parser.add_argument(
         "--style",
-        choices=["photo", "anime"],
+        choices=sorted(valid_sr_styles()),
         default=None,
-        help="Neural super-resolution style: photo (realesr-general-x4v3) or anime (realesr-animevideov3-x4)",
+        help="Neural super-resolution style (weights) and DSP profile family",
+    )
+    parser.add_argument(
+        "--style-profile",
+        choices=sorted(STYLE_PROFILES),
+        default=None,
+        help="DSP parameter profile override (default: follows --style)",
     )
 
     # Preset Selection
@@ -365,6 +373,8 @@ def main(args: List[str] = None) -> int:
     cfg.device = DeviceTarget(parsed.device)
     if parsed.style is not None:
         cfg.sr_style = parsed.style
+    if parsed.style_profile is not None:
+        cfg.style_profile = parsed.style_profile
     cfg.auto_tune = parsed.auto
     if parsed.auto:
         # Auto-tuning needs diagnostics to compute recommendations.

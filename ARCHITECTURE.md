@@ -274,6 +274,30 @@ $$I^c_{\text{out}} = I^c \cdot \frac{L'}{L + 10^{-4}} (1.0 - \beta_h \cdot 0.70 
 
 ---
 
+### 2.10 Style-Bound DSP Profiles
+
+Neural style selection (`photo` / `anime`) swaps edge-synthesis weights, but
+the analytical DSP chain underneath was historically photo-tuned for every
+input: SWF denoising erases halftone screentones as if they were sensor
+noise, CAS overshoots on high-contrast ink lines, and YuNet landmark
+retouching misfires on illustrated faces. Style profiles close this gap by
+binding each style to DSP parameter overlays (`STYLE_PROFILES`):
+
+- **Photo** is the empty profile: default path, bitwise identical.
+- **Anime** assumes flat color fills bounded by ink: lighter SWF cleaning
+  (25), micro-texture gain near unity (1.05) with firm structural contours
+  (1.15), CAS capped at 0.8 against line halos, retouch disabled.
+- **Manga** assumes bilevel ink plus periodic screentones: SWF and contrast
+  fusion disabled (dot energy is signal, verified by halftone regression
+  tests), micro-texture unity, semantic parsing off (skin-locus cues do not
+  apply), local tone off.
+
+Resolution order is explicit-flags > presets > auto-tune results >
+style profile > library defaults: a profile only fills fields still at
+defaults, so user intent always wins and photo behavior cannot regress.
+
+---
+
 ## 3. Hardware Acceleration & Algorithmic Complexity
 
 PureScale 4.0 deploys a dual-engine hardware acceleration layer:

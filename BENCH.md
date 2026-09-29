@@ -155,6 +155,16 @@ Measured on AMD Ryzen 5 PRO 7640HS (Zen 4 CPU, AVX-512 / AVX2):
   resize-dominated, so faster hosts report a smaller speedup ratio at equal
   or better quality.
 
+### Style Profiles: Per-Style Stage Costs (PureDSP, 320x240, warmed-up host)
+
+Style profiles skip whole stages, so non-photo styles are also faster:
+
+| Style | Total | Skipped stages |
+| :--- | :--- | :--- |
+| **photo** | ~47 ms | — (all stages) |
+| **anime** | ~44 ms | portrait retouch (YuNet misfires on illustrated faces) |
+| **manga** | ~13 ms | SWF denoise, semantic parsing, BIMEF fusion, Oklab vibrance, portrait retouch |
+
 ---
 
 ## Architectural Insights & Optimizations
