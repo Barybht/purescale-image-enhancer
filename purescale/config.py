@@ -86,6 +86,12 @@ class PipelineConfig:
     contrast_boost: float = 1.80
     brightness_shift: int = 0
 
+    # Local Tone-Mapping & Highlight Reconstruction
+    enable_local_tone: bool = False
+    local_tone_strength: float = 0.50
+    highlight_recovery: float = 0.50
+    shadow_boost: float = 0.50
+
     # Perceptual Color & White Balance (Oklab & Bradford CAT16)
     vibrance_boost: float = 1.10
     color_temperature: int = 0
@@ -137,6 +143,9 @@ class PipelineConfig:
         _range("denoise_intensity", 10, 100)
         _range("contrast_boost", 1.0, 4.0)
         _range("brightness_shift", -50, 50)
+        _range("local_tone_strength", 0.0, 1.0)
+        _range("highlight_recovery", 0.0, 1.0)
+        _range("shadow_boost", 0.0, 1.0)
         _range("vibrance_boost", 1.0, 1.5)
         _range("color_temperature", -30, 30)
         _range("depixel_strength", 0, 100)
@@ -160,6 +169,10 @@ class PipelineConfig:
         if not isinstance(self.enable_fast_2x, bool):
             raise ValueError(
                 f"Invalid enable_fast_2x: {self.enable_fast_2x!r}. Must be a boolean."
+            )
+        if not isinstance(self.enable_local_tone, bool):
+            raise ValueError(
+                f"Invalid enable_local_tone: {self.enable_local_tone!r}. Must be a boolean."
             )
         if str(self.sr_style).lower() not in VALID_SR_STYLES:
             raise ValueError(
@@ -187,6 +200,10 @@ class PipelineConfig:
             "enable_contrast": self.enable_contrast,
             "contrast_boost": self.contrast_boost,
             "brightness_shift": self.brightness_shift,
+            "enable_local_tone": self.enable_local_tone,
+            "local_tone_strength": self.local_tone_strength,
+            "highlight_recovery": self.highlight_recovery,
+            "shadow_boost": self.shadow_boost,
             "vibrance_boost": self.vibrance_boost,
             "color_temperature": self.color_temperature,
             "depixel_strength": self.depixel_strength,
@@ -273,6 +290,10 @@ PRESETS: Dict[str, Dict[str, Any]] = {
         "pyramid_micro_texture": 1.35,
         "pyramid_structure_boost": 1.2,
         "enable_semantic_guidance": True,
+        "enable_local_tone": True,
+        "local_tone_strength": 0.45,
+        "highlight_recovery": 0.60,
+        "shadow_boost": 0.40,
     },
     "low-light": {
         "scale": 2.0,
@@ -292,6 +313,10 @@ PRESETS: Dict[str, Dict[str, Any]] = {
         "pyramid_micro_texture": 1.1,
         "pyramid_structure_boost": 1.1,
         "enable_semantic_guidance": True,
+        "enable_local_tone": True,
+        "local_tone_strength": 0.50,
+        "highlight_recovery": 0.30,
+        "shadow_boost": 0.70,
     },
     "art": {
         "scale": 3.0,

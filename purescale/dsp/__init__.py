@@ -7,6 +7,7 @@ on modern Zen 4 CPU SIMD architectures.
 from purescale.dsp.filters import side_window_filter, fast_guided_filter
 from purescale.dsp.upsample import edge_adaptive_upsample
 from purescale.dsp.contrast import bimef_exposure_fusion, contrast_adaptive_sharpen
+from purescale.dsp.tone import local_tone_mapping
 from purescale.dsp.color import (
     srgb_to_oklab,
     oklab_to_srgb,
@@ -49,6 +50,7 @@ __all__ = [
     "side_window_filter",
     "edge_adaptive_upsample",
     "bimef_exposure_fusion",
+    "local_tone_mapping",
     "contrast_adaptive_sharpen",
     "srgb_to_oklab",
     "oklab_to_srgb",

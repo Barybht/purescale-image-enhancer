@@ -133,6 +133,26 @@ Measured on AMD Ryzen 5 PRO 7640HS (DirectML GPU and Zen 4 CPU AVX-512):
   CLI `--fast-2x`, GUI toggle, enabled in preset `fast`) rather than the default.
   Reference 4x-then-downsample remains default for fidelity.
 
+### Post-Optimization: Local Tone-Mapping & Highlight Reconstruction (Task 3)
+
+Local Tone-Mapping decomposes luminance via a proxy-accelerated Fast Guided Filter
+into large-scale illumination base and high-frequency reflectance detail layers.
+Asymmetric toe expansion lifts crushed shadows below 0.40, while shoulder
+compression and specular desaturation reconstruct clipped channels (> 0.88).
+
+Measured on AMD Ryzen 5 PRO 7640HS (Zen 4 CPU, AVX-512 / AVX2):
+
+| Fixture / Resolution | Full-Res Latency (ms) | Proxy (480px) Latency (ms) | Speedup | Proxy Consistency PSNR | Proxy Consistency SSIM |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **1080p (1920x1080)** | 227.0 ms | 139.3 ms | **1.63x** | 54.28 dB | 0.9986 |
+| **720p (1280x720)** | 105.8 ms | 48.2 ms | **2.19x** | 54.35 dB | 0.9986 |
+| **VGA (640x480)** | 28.5 ms | 16.7 ms | **1.71x** | 54.50 dB | 0.9986 |
+| **QVGA (320x240)** | 3.3 ms | 3.3 ms (direct) | **1.00x** | inf (identical) | 1.0000 |
+
+- **Quality gates** (`test_local_tone_proxy_consistency`): Exceeds gating
+  thresholds (PSNR > 35 dB, SSIM > 0.98), achieving > 54 dB PSNR and > 0.998 SSIM
+  with 100% bitwise determinism ($L_\infty = 0$).
+
 ---
 
 ## Architectural Insights & Optimizations

@@ -401,6 +401,21 @@ def auto_tune_parameters(diag: DiagnosticsResult) -> Dict[str, Any]:
         params["enable_dehaze"] = False
         params["dehaze_strength"] = 0.0
 
+    # Local Tone-Mapping & Highlight Reconstruction
+    if diag.shadow_clipping > 3.0 or diag.highlight_clipping > 2.0:
+        params["enable_local_tone"] = True
+        params["local_tone_strength"] = float(round(np.clip(
+            0.35 + (diag.shadow_clipping + diag.highlight_clipping) * 0.03, 0.30, 0.85
+        ), 2))
+        params["highlight_recovery"] = float(round(np.clip(
+            diag.highlight_clipping * 0.12, 0.20, 0.90
+        ), 2))
+        params["shadow_boost"] = float(round(np.clip(
+            diag.shadow_clipping * 0.10, 0.20, 0.85
+        ), 2))
+    else:
+        params["enable_local_tone"] = False
+
     params["color_temperature"] = int(np.clip(diag.color_cast_kelvin, -30, 30))
     params["vibrance_boost"] = 1.10
 

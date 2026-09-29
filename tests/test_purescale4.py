@@ -49,6 +49,7 @@ from purescale.dsp.restore import (
     directional_subpixel_depixelate,
     tensor_steered_shock_filter,
 )
+from purescale.dsp.tone import local_tone_mapping
 from purescale.pipeline import PureScalePipeline
 
 
@@ -262,6 +263,52 @@ class TestPureScale4SideWindowFilter(unittest.TestCase):
         self.assertTrue(np.array_equal(proxy, again))
 
 
+class TestPureScale4ToneMapping(unittest.TestCase):
+    """Test suite for Local Tone-Mapping and Highlight Reconstruction."""
+
+    def test_local_tone_determinism(self):
+        rng = np.random.default_rng(42)
+        img = rng.integers(0, 256, (120, 160, 3), dtype=np.uint8)
+        out1 = local_tone_mapping(img, strength=0.6, highlight_recovery=0.5, shadow_boost=0.5)
+        out2 = local_tone_mapping(img, strength=0.6, highlight_recovery=0.5, shadow_boost=0.5)
+        self.assertTrue(np.array_equal(out1, out2))
+        self.assertEqual(out1.shape, img.shape)
+        self.assertEqual(out1.dtype, np.uint8)
+
+    def test_local_tone_proxy_consistency(self):
+        from purescale.quality import compare_images
+        from bench.bench import make_fixture
+
+        img = make_fixture(640, 480)
+        full = local_tone_mapping(img, strength=0.5, highlight_recovery=0.5, shadow_boost=0.5, proxy_max_dim=0)
+        proxy = local_tone_mapping(img, strength=0.5, highlight_recovery=0.5, shadow_boost=0.5, proxy_max_dim=320)
+        metrics = compare_images(full, proxy)
+        self.assertGreater(metrics["psnr_db"], 35.0)
+        self.assertGreater(metrics["ssim"], 0.98)
+
+        again = local_tone_mapping(img, strength=0.5, highlight_recovery=0.5, shadow_boost=0.5, proxy_max_dim=320)
+        self.assertTrue(np.array_equal(proxy, again))
+
+    def test_local_tone_shadow_and_highlight_efficacy(self):
+        img = np.full((100, 100, 3), 128, dtype=np.uint8)
+        img[:40, :40] = 15
+        img[60:, 60:] = 250
+
+        out = local_tone_mapping(img, strength=0.7, highlight_recovery=0.8, shadow_boost=0.8)
+        shadow_in = float(img[:40, :40].mean())
+        shadow_out = float(out[:40, :40].mean())
+        self.assertGreater(shadow_out, shadow_in)
+
+        hl_in = float(img[60:, 60:].mean())
+        hl_out = float(out[60:, 60:].mean())
+        self.assertLess(hl_out, hl_in)
+
+    def test_local_tone_bypass(self):
+        img = np.full((64, 64, 3), 120, dtype=np.uint8)
+        out = local_tone_mapping(img, strength=0.0, highlight_recovery=0.0, shadow_boost=0.0)
+        self.assertTrue(np.array_equal(img, out))
+
+
 class TestPureScale4Pipeline(unittest.TestCase):
     """Test suite for end-to-end PureScale 4.0 Pipeline determinism."""
 
@@ -316,8 +363,12 @@ class TestPureScale4Pipeline(unittest.TestCase):
             {"depixel_strength": -1}, {"depixel_strength": 101},
             {"deblur_strength": 101}, {"portrait_smooth": 101},
             {"eye_clarity": 0.9}, {"eye_clarity": 2.1},
+            {"local_tone_strength": -0.1}, {"local_tone_strength": 1.1},
+            {"highlight_recovery": -0.1}, {"highlight_recovery": 1.1},
+            {"shadow_boost": -0.1}, {"shadow_boost": 1.1},
             {"output_format": "TIFF"},
             {"enable_fast_2x": "invalid"},
+            {"enable_local_tone": "invalid"},
             {"sr_style": "unknown"},
         ):
             with self.subTest(kwargs=kwargs):
@@ -336,6 +387,20 @@ class TestPureScale4Pipeline(unittest.TestCase):
         params = auto_tune_parameters(diag)
         cfg = PipelineConfig(**{k: v for k, v in params.items() if hasattr(PipelineConfig(), k)})
         cfg.validate()
+
+        # Clipping-driven local tone mapping activation
+        diag_clipped = DiagnosticsResult(
+            noise_sigma=1.0, blur_score=0.2, entropy=7.0,
+            dynamic_range=200, mean_luminance=120.0,
+            color_cast_kelvin=0, haze_index=0.05,
+            haze_detected=False, shadow_clipping=6.5, highlight_clipping=4.2,
+        )
+        params_clipped = auto_tune_parameters(diag_clipped)
+        self.assertTrue(params_clipped.get("enable_local_tone"))
+        self.assertGreater(params_clipped.get("highlight_recovery"), 0.3)
+        self.assertGreater(params_clipped.get("shadow_boost"), 0.3)
+        cfg_clipped = PipelineConfig(**{k: v for k, v in params_clipped.items() if hasattr(PipelineConfig(), k)})
+        cfg_clipped.validate()
 
     def test_pipeline_grayscale_and_rgba(self):
         pipeline = PureScalePipeline()
@@ -433,6 +498,24 @@ class TestPureScale4CliAndGui(unittest.TestCase):
         code = main([self.temp_in, "-o", self.temp_out, "--style", "anime", "--scale", "2.0"])
         self.assertEqual(code, 0)
 
+    def test_cli_local_tone_flags(self):
+        from purescale.cli import main
+        code = main([
+            self.temp_in, "-o", self.temp_out,
+            "--local-tone", "--tone-strength", "0.6",
+            "--highlight-recovery", "0.7", "--shadow-boost", "0.4",
+            "--scale", "1.0",
+        ])
+        self.assertEqual(code, 0)
+        self.assertTrue(os.path.exists(self.temp_out))
+
+        code = main([
+            self.temp_in, "-o", self.temp_out,
+            "--preset", "landscape", "--no-local-tone",
+            "--scale", "1.0",
+        ])
+        self.assertEqual(code, 0)
+
     def test_headless_gui(self):
         if not _TK_AVAILABLE:
             self.skipTest("tkinter not available on this runner")
@@ -449,6 +532,8 @@ class TestPureScale4CliAndGui(unittest.TestCase):
             app._on_preset_change("Landscape")
             self.assertTrue(app.dehaze_switch.get())
             self.assertAlmostEqual(app.dehaze_slider.get(), 0.6)
+            self.assertTrue(app.local_tone_switch.get())
+            self.assertAlmostEqual(app.tone_strength_slider.get(), 0.45)
             self.assertFalse(app.fast_2x_switch.get())
             self.assertEqual(app.style_seg.get(), "Photo")
 

@@ -251,6 +251,23 @@ def main(args: List[str] = None) -> int:
     parser.add_argument("--denoise-intensity", type=int, default=None, help="Side Window Filter cleaning power (10-100)")
     parser.add_argument("--no-contrast", action="store_true", help="Disable BIMEF dynamic range fusion")
     parser.add_argument("--contrast-boost", type=float, default=None, help="BIMEF exposure curve factor (1.0-4.0)")
+    parser.add_argument(
+        "--local-tone",
+        dest="local_tone",
+        action="store_true",
+        default=None,
+        help="Enable local tone-mapping and highlight reconstruction",
+    )
+    parser.add_argument(
+        "--no-local-tone",
+        dest="local_tone",
+        action="store_false",
+        default=None,
+        help="Disable local tone-mapping and highlight reconstruction",
+    )
+    parser.add_argument("--tone-strength", type=float, default=None, help="Local tone-mapping compression strength (0.0 to 1.0)")
+    parser.add_argument("--highlight-recovery", type=float, default=None, help="Highlight recovery and specular desaturation (0.0 to 1.0)")
+    parser.add_argument("--shadow-boost", type=float, default=None, help="Shadow toe lifting power (0.0 to 1.0)")
     parser.add_argument("--brightness", type=int, default=None, help="Radiometric brightness shift (-50 to +50)")
     parser.add_argument("--vibrance", type=float, default=None, help="Oklab perceptual vibrance boost (1.0-1.5)")
     parser.add_argument("--temperature", type=int, default=None, help="Bradford CAT16 color temperature shift (-30 to +30)")
@@ -376,6 +393,14 @@ def main(args: List[str] = None) -> int:
         cfg.enable_contrast = False
     if parsed.contrast_boost is not None:
         cfg.contrast_boost = parsed.contrast_boost
+    if parsed.local_tone is not None:
+        cfg.enable_local_tone = parsed.local_tone
+    if parsed.tone_strength is not None:
+        cfg.local_tone_strength = parsed.tone_strength
+    if parsed.highlight_recovery is not None:
+        cfg.highlight_recovery = parsed.highlight_recovery
+    if parsed.shadow_boost is not None:
+        cfg.shadow_boost = parsed.shadow_boost
     if parsed.brightness is not None:
         cfg.brightness_shift = parsed.brightness
     if parsed.vibrance is not None:

@@ -491,6 +491,14 @@ class PureScaleApp(ctk.CTk):
         self.contrast_slider.pack(fill="x", padx=8)
         self.bright_slider = LabeledSlider(bimef_card, label="Radiometric Exposure Offset", from_=-50, to=50, default_val=0, step=5, is_float=False)
         self.bright_slider.pack(fill="x", padx=8)
+        self.local_tone_switch = ctk.CTkSwitch(bimef_card, text="Local Tone & Highlight Recovery", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
+        self.local_tone_switch.pack(anchor="w", padx=12, pady=(4, 2))
+        self.tone_strength_slider = LabeledSlider(bimef_card, label="Local Tone Strength", from_=0.0, to=1.0, default_val=0.50, step=0.05, is_float=True)
+        self.tone_strength_slider.pack(fill="x", padx=8)
+        self.hl_recovery_slider = LabeledSlider(bimef_card, label="Highlight Recovery", from_=0.0, to=1.0, default_val=0.50, step=0.05, is_float=True)
+        self.hl_recovery_slider.pack(fill="x", padx=8)
+        self.shadow_boost_slider = LabeledSlider(bimef_card, label="Shadow Toe Boost", from_=0.0, to=1.0, default_val=0.50, step=0.05, is_float=True)
+        self.shadow_boost_slider.pack(fill="x", padx=8)
 
         # 10. Perceptual Color & White Balance Card
         color_card = ParameterCard(
@@ -564,6 +572,12 @@ class PureScaleApp(ctk.CTk):
         self.contrast_slider.set_enabled(not is_neural)
         self.bright_slider.set_enabled(not is_neural)
 
+        # Local Tone: enabled in PureDSP and Hybrid, disabled in Neural AI
+        self.local_tone_switch.configure(state="normal" if not is_neural else "disabled")
+        self.tone_strength_slider.set_enabled(not is_neural)
+        self.hl_recovery_slider.set_enabled(not is_neural)
+        self.shadow_boost_slider.set_enabled(not is_neural)
+
         # Perceptual Vibrance & Color Temp: enabled in PureDSP and Hybrid, disabled in Neural AI
         self.vibrance_slider.set_enabled(not is_neural)
         self.temp_slider.set_enabled(not is_neural)
@@ -627,6 +641,13 @@ class PureScaleApp(ctk.CTk):
             self.contrast_switch.select()
         else:
             self.contrast_switch.deselect()
+        if getattr(cfg, "enable_local_tone", False):
+            self.local_tone_switch.select()
+        else:
+            self.local_tone_switch.deselect()
+        self.tone_strength_slider.set(getattr(cfg, "local_tone_strength", 0.50))
+        self.hl_recovery_slider.set(getattr(cfg, "highlight_recovery", 0.50))
+        self.shadow_boost_slider.set(getattr(cfg, "shadow_boost", 0.50))
         if getattr(cfg, "enable_fast_2x", False):
             self.fast_2x_switch.select()
         else:
@@ -739,6 +760,17 @@ class PureScaleApp(ctk.CTk):
             self.pyramid_detail_slider.set(rec["pyramid_micro_texture"])
         if "pyramid_structure_boost" in rec:
             self.pyramid_struct_slider.set(rec["pyramid_structure_boost"])
+        if "enable_local_tone" in rec:
+            if rec["enable_local_tone"]:
+                self.local_tone_switch.select()
+            else:
+                self.local_tone_switch.deselect()
+        if "local_tone_strength" in rec:
+            self.tone_strength_slider.set(rec["local_tone_strength"])
+        if "highlight_recovery" in rec:
+            self.hl_recovery_slider.set(rec["highlight_recovery"])
+        if "shadow_boost" in rec:
+            self.shadow_boost_slider.set(rec["shadow_boost"])
 
     def _on_auto_enhance_click(self) -> None:
         """Executes autonomous auto-tuning and enhancement."""
@@ -779,6 +811,10 @@ class PureScaleApp(ctk.CTk):
             enable_contrast=bool(self.contrast_switch.get()),
             contrast_boost=self.contrast_slider.get(),
             brightness_shift=int(self.bright_slider.get()),
+            enable_local_tone=bool(self.local_tone_switch.get()),
+            local_tone_strength=self.tone_strength_slider.get(),
+            highlight_recovery=self.hl_recovery_slider.get(),
+            shadow_boost=self.shadow_boost_slider.get(),
             vibrance_boost=self.vibrance_slider.get(),
             color_temperature=int(self.temp_slider.get()),
             depixel_strength=int(self.depixel_slider.get()),

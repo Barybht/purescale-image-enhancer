@@ -184,6 +184,10 @@ remains the zero-dependency fallback.
 | `sharpen_strength` | `--sharpen` | 1.1 | 0.0 - 3.0 | **Detail Clarity**: Contrast-Adaptive Sharpening (CAS) halo-free gain. |
 | `denoise_intensity`| `--denoise-intensity` | 40 | 10 - 100 | **Cleaning Power**: Side Window Filter (SWF) noise attenuation strength. |
 | `contrast_boost` | `--contrast-boost` | 1.8 | 1.0 - 4.0 | **HDR Dynamic Range**: BIMEF exposure fusion tone curve factor. |
+| `enable_local_tone`| `--local-tone` / `--no-local-tone` | False | Boolean | **Local Tone-Mapping**: Enables Fast Guided Filter dynamic range compression & highlight reconstruction. |
+| `local_tone_strength`| `--tone-strength` | 0.50 | 0.0 - 1.0 | **Tone Compression**: Large-scale illumination compression strength. |
+| `highlight_recovery`| `--highlight-recovery` | 0.50 | 0.0 - 1.0 | **Highlight Recovery**: Shoulder compression and specular desaturation for clipped channels. |
+| `shadow_boost` | `--shadow-boost` | 0.50 | 0.0 - 1.0 | **Shadow Boost**: Smooth toe expansion for underexposed shadows. |
 | `brightness` | `--brightness` | 0 | -50 to +50 | **Radiometric Exposure**: Additive brightness shift offset. |
 | `vibrance` | `--vibrance` | 1.10 | 1.0 - 1.5 | **Perceptual Vibrance**: Color saturation multiplier in Oklab LMS cone space. |
 | `temperature` | `--temperature` | 0 | -30 to +30 | **White Balance**: Bradford CAT16 chromatic adaptation offset. |

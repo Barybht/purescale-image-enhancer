@@ -19,6 +19,7 @@ from purescale.config import (
 )
 from purescale.dsp.color import bradford_cat16_white_balance, oklab_vibrance
 from purescale.dsp.contrast import bimef_exposure_fusion, contrast_adaptive_sharpen
+from purescale.dsp.tone import local_tone_mapping
 from purescale.dsp.dehaze import atmospheric_dehaze
 from purescale.dsp.diagnostics import diagnose_image
 from purescale.dsp.filters import side_window_filter
@@ -184,6 +185,32 @@ class PureScalePipeline:
         t0 = time.perf_counter()
         cur = bimef_exposure_fusion(cur, contrast_boost=cfg.contrast_boost)
         stage_latencies["bimef_contrast"] = (time.perf_counter() - t0) * 1000.0
+        return cur
+
+    def _run_local_tone(
+        self,
+        cur: np.ndarray,
+        cfg: "PipelineConfig",
+        progress_label: str,
+        progress_ratio: float,
+        report: Callable[[str, float], None],
+        stage_latencies: Dict[str, float],
+    ) -> np.ndarray:
+        if not cfg.enable_local_tone or (
+            cfg.local_tone_strength <= 0.001
+            and cfg.highlight_recovery <= 0.001
+            and cfg.shadow_boost <= 0.001
+        ):
+            return cur
+        report(progress_label, progress_ratio)
+        t0 = time.perf_counter()
+        cur = local_tone_mapping(
+            cur,
+            strength=cfg.local_tone_strength,
+            highlight_recovery=cfg.highlight_recovery,
+            shadow_boost=cfg.shadow_boost,
+        )
+        stage_latencies["local_tone"] = (time.perf_counter() - t0) * 1000.0
         return cur
 
     def _run_cas(
@@ -455,6 +482,12 @@ class PureScalePipeline:
                 progress_ratio=0.60, report=report, stage_latencies=stage_latencies,
             )
 
+            # 4.5 Local Tone-Mapping & Highlight Reconstruction
+            cur = self._run_local_tone(
+                cur, cfg, progress_label="Local Tone-Mapping & Highlight Reconstruction",
+                progress_ratio=0.64, report=report, stage_latencies=stage_latencies,
+            )
+
             # 5. Radiometric Exposure Offset
             if cfg.brightness_shift != 0:
                 report("Exposure Offset", 0.68)
@@ -549,6 +582,12 @@ class PureScalePipeline:
             cur = self._run_bimef(
                 cur, cfg, progress_label="Dynamic Range Fusion (BIMEF)",
                 progress_ratio=0.65, report=report, stage_latencies=stage_latencies,
+            )
+
+            # 4.5 Local Tone-Mapping & Highlight Reconstruction
+            cur = self._run_local_tone(
+                cur, cfg, progress_label="Local Tone-Mapping & Highlight Reconstruction",
+                progress_ratio=0.70, report=report, stage_latencies=stage_latencies,
             )
 
             # 5. Micro-Texture Clarity (CAS)
