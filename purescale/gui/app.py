@@ -14,6 +14,7 @@ import numpy as np
 from PIL import Image
 
 from purescale.config import (
+    AUTO_STYLE_CONFIDENCE,
     PRESETS,
     DeviceTarget,
     DiagnosticsResult,
@@ -892,6 +893,29 @@ class PureScaleApp(ctk.CTk):
         self.progress_bar.set(ratio)
         self.status_label.configure(text=f"Stage: {stage_name}")
 
+    @staticmethod
+    def _routed_style_label(diag: DiagnosticsResult) -> Optional[str]:
+        """Human label for an auto-routed non-photo style, else None."""
+        conf = float(getattr(diag, "style_confidence", 0.0) or 0.0)
+        name = str(getattr(diag, "suggested_style", "photo") or "photo")
+        if conf >= AUTO_STYLE_CONFIDENCE and name.lower() != "photo":
+            return name.title()
+        return None
+
+    def _sync_routed_style(self, diag: DiagnosticsResult) -> None:
+        """Reflects auto-routed weights style in the style selector.
+
+        Only registry (weights) styles have segmented values; a manga
+        routing keeps photo weights, so the selector correctly stays put
+        while the HUD row and status bar report the DSP profile.
+        """
+        routed = self._routed_style_label(diag)
+        if routed is None:
+            return
+        labels = [s.title() for s in valid_sr_styles()]
+        if routed in labels:
+            self.style_seg.set(routed)
+
     def _on_enhancement_complete(self, res: ProcessingResult) -> None:
         self.is_processing = False
         self.btn_enhance.configure(state="normal", text="Enhance Image")
@@ -902,6 +926,7 @@ class PureScaleApp(ctk.CTk):
         if res.diagnostics:
             self.current_diagnostics = res.diagnostics
             self.hud_card.update_diagnostics(res.diagnostics)
+            self._sync_routed_style(res.diagnostics)
 
         # Convert to PIL and update canvas
         rgb = cv2.cvtColor(res.image, cv2.COLOR_BGR2RGB)
@@ -910,8 +935,13 @@ class PureScaleApp(ctk.CTk):
 
         h, w = res.image.shape[:2]
         faces_str = f" | {res.faces_detected} faces" if res.faces_detected > 0 else ""
+        style_str = ""
+        if res.diagnostics:
+            routed = self._routed_style_label(res.diagnostics)
+            if routed is not None:
+                style_str = f" | style: {routed}"
         self.status_label.configure(
-            text=f"Done in {res.latency_ms:.1f} ms ({res.backend_name}) | {w}x{h}{faces_str}"
+            text=f"Done in {res.latency_ms:.1f} ms ({res.backend_name}) | {w}x{h}{faces_str}{style_str}"
         )
 
         # Completion dialog: success is otherwise silent (status bar only).

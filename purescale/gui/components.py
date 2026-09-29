@@ -4,7 +4,7 @@ from typing import Callable, Optional
 import customtkinter as ctk
 from tkinter import messagebox
 
-from purescale.config import DiagnosticsResult
+from purescale.config import AUTO_STYLE_CONFIDENCE, DiagnosticsResult
 
 
 class ParameterCard(ctk.CTkFrame):
@@ -160,6 +160,7 @@ class DiagnosticsHUDCard(ParameterCard):
                 "Optical Blur Index: defocus estimate from Laplacian variance.\n"
                 "Dynamic Entropy: histogram spread and clipping.\n"
                 "Atmospheric Haze: fog detection from the dark channel.\n"
+                "Content Style: photo / anime / manga classification.\n"
                 "Scene Semantics: soft sky / foliage / skin / shadow share.\n\n"
                 "Auto-Enhance copies these into the sliders below."
             ),
@@ -182,6 +183,7 @@ class DiagnosticsHUDCard(ParameterCard):
         self.blur_val = create_metric_row("Optical Blur Index")
         self.entropy_val = create_metric_row("Dynamic Entropy")
         self.haze_val = create_metric_row("Atmospheric Haze")
+        self.style_val = create_metric_row("Content Style")
         self.scene_val = create_metric_row("Scene Semantics")
 
     def update_diagnostics(self, diag: Optional[DiagnosticsResult]) -> None:
@@ -191,6 +193,7 @@ class DiagnosticsHUDCard(ParameterCard):
             self.blur_val.configure(text="--", text_color="#64748b")
             self.entropy_val.configure(text="--", text_color="#64748b")
             self.haze_val.configure(text="--", text_color="#64748b")
+            self.style_val.configure(text="--", text_color="#64748b")
             self.scene_val.configure(text="--", text_color="#64748b")
             return
 
@@ -209,6 +212,12 @@ class DiagnosticsHUDCard(ParameterCard):
         haze_color = "#f87171" if diag.haze_detected else "#4ade80"
         haze_text = f"{diag.haze_index:.2f} [{'HAZE' if diag.haze_detected else 'CLEAR'}]"
         self.haze_val.configure(text=haze_text, text_color=haze_color)
+
+        # Style (amber when below the auto-routing threshold: shown but not applied)
+        style_conf = float(getattr(diag, "style_confidence", 0.0) or 0.0)
+        style_name = str(getattr(diag, "suggested_style", "photo") or "photo")
+        style_color = "#38bdf8" if style_conf >= AUTO_STYLE_CONFIDENCE else "#facc15"
+        self.style_val.configure(text=f"{style_name.title()} [{style_conf:.2f}]", text_color=style_color)
 
         # Scene breakdown (same 5% threshold as the CLI summary table;
         # wrapped HUD label shows top entries instead of truncating at 3).

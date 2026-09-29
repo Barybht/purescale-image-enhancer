@@ -631,6 +631,48 @@ class TestPureScale4CliAndGui(unittest.TestCase):
             else:
                 raise e
 
+    def test_gui_style_routing_display(self):
+        if not _TK_AVAILABLE:
+            self.skipTest("tkinter not available on this runner")
+        try:
+            import customtkinter  # noqa: F401
+        except ImportError as e:
+            self.skipTest(f"GUI dependencies not installed: {e}")
+        from purescale.gui.app import PureScaleApp
+        try:
+            app = PureScaleApp()
+            from purescale.config import DiagnosticsResult
+
+            # HUD shows classified style with confidence.
+            diag = DiagnosticsResult(suggested_style="anime", style_confidence=0.85)
+            app.hud_card.update_diagnostics(diag)
+            self.assertIn("Anime", app.hud_card.style_val.cget("text"))
+            self.assertIn("0.85", app.hud_card.style_val.cget("text"))
+
+            # Routed weights style syncs the selector...
+            app.style_seg.set("Photo")
+            app._sync_routed_style(diag)
+            self.assertEqual(app.style_seg.get(), "Anime")
+            self.assertEqual(app._routed_style_label(diag), "Anime")
+
+            # ...but manga keeps photo weights: selector stays, HUD reports.
+            diag_manga = DiagnosticsResult(suggested_style="manga", style_confidence=0.90)
+            app._sync_routed_style(diag_manga)
+            self.assertEqual(app.style_seg.get(), "Anime")
+            self.assertEqual(app._routed_style_label(diag_manga), "Manga")
+
+            # Photo / low confidence: no label, no sync.
+            self.assertIsNone(app._routed_style_label(DiagnosticsResult()))
+            low = DiagnosticsResult(suggested_style="anime", style_confidence=0.30)
+            self.assertIsNone(app._routed_style_label(low))
+
+            app.destroy()
+        except Exception as e:
+            if _is_display_error(e):
+                self.skipTest(f"Headless display not available: {e}")
+            else:
+                raise e
+
 
 class TestPureScale4GuiScrolling(unittest.TestCase):
     """Tests kinetic sidebar scrolling math (display-free) and routing."""
