@@ -223,6 +223,7 @@ PureScale 4.0 deploys a dual-engine hardware acceleration layer:
 | **Semantic Parsing (-0.5)**| Multi-Cue Guided | $O(N)$ | Zen 4 CPU AVX-512 | ~174 ms |
 | **Shock Deblur (Stage 0)** | Structure Tensor | $O(N)$ | Zen 4 CPU AVX-512 | — (off by default) |
 | **Dehaze (Stage 1)** | Dark Channel Guided | $O(N)$ | Zen 4 CPU AVX-512 | — (off by default; ~218 ms at 0.65) |
+| **SWF Denoise (Stage 2)** | 8-Window Variance-Min | $O(N)$ | Zen 4 CPU AVX-512 | ~844 ms (largest stage; proxy path for >480px images, see `BENCH.md` Phase 2c) |
 | **EASU Super-Res (Stage 2)**| Anisotropic Sinc | $O(s^2 N)$ | Zen 4 CPU AVX-512 | ~522 ms (only at 2.0x scale, 1080p → 4K; excluded from 1.0x total) |
 | **Multiscale Pyramids (3)** | 4-Octave Laplacian | $O(N)$ | Zen 4 CPU AVX-512 | ~96 ms |
 | **BIMEF Dynamic Range (4)**| Anchored S-Curve | $O(N)$ | Zen 4 CPU AVX-512 | ~186 ms |
@@ -239,7 +240,7 @@ PureScale 4.0 deploys a dual-engine hardware acceleration layer:
 
 Evaluated across commodity laptop hardware (AMD Ryzen 5 PRO 7640HS + Radeon 760M iGPU):
 
-| Architecture | Paradigm | 1080p $\rightarrow$ 4K Latency | Peak Memory | Determinism | Hallucination Risk |
+| Architecture | Paradigm | 1080p Latency (1.0x scale) | Peak Memory | Determinism | Hallucination Risk |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **PureScale 4.0 (PureDSP)** | Analytical Multiscale DSP | **~2.0 s** | **~62 MB** | **100% Bitwise** | **0% (None)** |
 | **PureScale 4.0 (Hybrid)** | AI + Multiscale DSP | **~420 ms** | **~195 MB** | High Reproducibility | Minimal |

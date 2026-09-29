@@ -55,7 +55,7 @@ All advanced computer vision algorithms enabled simultaneously:
 | **Diagnostics** | Wavelet MAD, Blur, Shannon Entropy | 77.41 ms | 3.4% |
 | **Semantic Parsing** | Multi-cue opponent soft probability masks | 127.59 ms | 5.6% |
 | **Dehazing** | Dark Channel Prior & Guided Filter transmission | 318.22 ms | 13.9% |
-| **SWF Denoise** | 8-Directional variance-minimizing box filter | 1004.65 ms | 43.8% |
+| **SWF Denoise** | 8-Directional variance-minimizing box filter | 1004.65 ms (pre-proxy; see Phase 2c) | 43.8% |
 | **Laplacian Pyramid** | 4-Octave Local Laplacian frequency decomposition | 68.91 ms | 3.0% |
 | **BIMEF Fusion** | Black-point pinned exposure fusion | 132.44 ms | 5.8% |
 | **CAS Sharpening** | Contrast-Adaptive Sharpening kernel | 192.79 ms | 8.4% |
@@ -74,7 +74,7 @@ dehazing off per balanced defaults):
 | :--- | :--- |
 | **Diagnostics** | 90.1 ms |
 | **Semantic Parsing** | 174.4 ms |
-| **SWF Denoise** | 844.1 ms |
+| **SWF Denoise** | 844.1 ms (pre-proxy; see Phase 2c) |
 | **Laplacian Pyramid** | 96.1 ms |
 | **BIMEF Fusion** | 186.0 ms |
 | **CAS Sharpening** | 228.3 ms |

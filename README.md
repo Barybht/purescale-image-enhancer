@@ -194,6 +194,8 @@ zero-dependency fallback.
 | `no_contrast` | `--no-contrast` | False | Boolean | **Bypass Flag**: Disables BIMEF dynamic range fusion. |
 | `format` | `--format` | PNG | PNG, JPEG, WebP | **Container Format**: Lossless PNG (alpha supported), JPEG (95%), or WebP (95%). |
 
+All numeric ranges above are enforced: out-of-range values fail fast
+(CLI exits with an `error:`, Python API raises `ValueError`).
 
 ---
 
