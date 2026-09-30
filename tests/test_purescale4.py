@@ -989,6 +989,14 @@ def _style_probe(kind: str) -> np.ndarray:
     if kind == "manga-color":
         base = _style_probe("manga").astype(np.float32)
         return np.clip(base * np.array([1.0, 0.7, 0.4], np.float32), 0, 255).astype(np.uint8)
+    if kind == "bw-ink":
+        # B&W ink regions without fine dots (large flats + structure).
+        ink = np.full((128, 128), 230, np.uint8)
+        ink[20:60, 20:100] = 20
+        ink[70:110, 30:90] = 120
+        rng = np.random.default_rng(17)
+        ink = np.clip(ink.astype(np.float32) + rng.normal(0, 2.0, ink.shape), 0, 255).astype(np.uint8)
+        return np.repeat(ink[:, :, np.newaxis], 3, axis=2)
     # noisy photo gradient
     x = np.linspace(0, 1, 128, dtype=np.float32)[None, :].repeat(128, axis=0)
     base = np.stack([x * 180 + 30, x * 150 + 40, (1 - x) * 120 + 30], axis=-1)
@@ -1030,6 +1038,11 @@ class TestPureScale4AutoStyle(unittest.TestCase):
         gray = cv2.cvtColor(_style_probe("manga"), cv2.COLOR_BGR2GRAY)
         style, _ = classify_content_style(gray)
         self.assertEqual(style, "manga")
+
+        # B&W ink flats route to manga (no color, few tones, structure).
+        style, conf = classify_content_style(_style_probe("bw-ink"))
+        self.assertEqual(style, "manga")
+        self.assertGreaterEqual(conf, 0.60)
 
     def test_classifier_determinism(self):
         from purescale.dsp.diagnostics import classify_content_style

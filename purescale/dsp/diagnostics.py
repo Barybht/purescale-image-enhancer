@@ -281,17 +281,22 @@ def classify_content_style(img_bgr: np.ndarray) -> Tuple[str, float]:
     "manga") from cheap proxy signals, deterministically.
 
     Signals (160px proxy): mean HSV saturation, quantized unique-color
-    fraction (5 bits/channel), and high-pass residual energy ratio
-    (dot/line-scale structure vs broadband variance).
+    fraction (5 bits/channel), 95%-coverage color concentration (fraction
+    of distinct colors covering 95% of pixels — robust to the JPEG noise
+    that defeats raw distinct counts on real files), and high-pass
+    residual energy ratio (dot/line-scale structure vs broadband variance).
 
     Decision order (first match wins):
-    - manga: near-zero saturation with strong fine-periodic energy
-      (B&W halftone screentones), or dot-scale energy above 0.75
-      regardless of color (color halftones). B&W photos fail the
-      energy gate; noisy photos fail it too (resid ~0.48).
+    - manga: near-zero saturation with few quantized colors and genuine
+      structure (B&W ink/halftones; the residual floor rejects smooth
+      B&W gradients), or dot-scale energy above 0.75 regardless of
+      color (color halftones). B&W photos fail the color/energy gates;
+      noisy photos fail the dot-energy gate (resid ~0.48).
     - anime: very few distinct colors with genuine ink-edge energy (a
       0.20 residual floor rejects clean/blurred gradients, whose
-      smoothness would otherwise mimic flat color) and real color.
+      smoothness would otherwise mimic flat color) and real color, or
+      concentrated color usage (n95 < 0.20) with structure and color
+      (painterly illustration, whose gradients defeat raw color counts).
     - photo: fallback for natural imagery.
 
     Returns:
@@ -311,10 +316,21 @@ def classify_content_style(img_bgr: np.ndarray) -> Tuple[str, float]:
     sat = float(hsv[:, :, 1].astype(np.float32).mean() / 255.0)
 
     q = (small.astype(np.uint16) >> 5).reshape(-1, 3)
-    uniq = float(len(np.unique(q[:, 0] * 1024 + q[:, 1] * 32 + q[:, 2]))) / float(q.shape[0])
+    keys = q[:, 0] * 1024 + q[:, 1] * 32 + q[:, 2]
+    n_pixels = float(q.shape[0])
+    uniq = float(len(np.unique(keys))) / n_pixels
+    _vals, counts = np.unique(keys, return_counts=True)
+    counts = np.sort(counts)[::-1]
+    n95 = float(np.searchsorted(np.cumsum(counts) / counts.sum(), 0.95) + 1) / float(len(counts))
 
     gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32)
     resid = float((gray - cv2.GaussianBlur(gray, (9, 9), 2.0)).std() / (gray.std() + 1e-6))
+
+    if sat < 0.05 and uniq < 0.0035 and resid > 0.15:
+        m1 = min((0.0035 - uniq) / 0.0035, 1.0)
+        m2 = min((resid - 0.15) / 0.30, 1.0)
+        m3 = min((0.05 - sat) / 0.05, 1.0)
+        return "manga", float(round(0.55 + 0.45 * min(m1, m2, m3), 3))
 
     if sat < 0.05 and resid > 0.60:
         m1 = min((resid - 0.60) / 0.40, 1.0)
@@ -329,6 +345,14 @@ def classify_content_style(img_bgr: np.ndarray) -> Tuple[str, float]:
         m1 = min((0.001 - uniq) / 0.001, 1.0)
         m2 = min((0.70 - resid) / 0.70, 1.0)
         m3 = min((resid - 0.20) / 0.20, 1.0)
+        return "anime", float(round(0.55 + 0.45 * min(m1, m2, m3), 3))
+
+    if n95 < 0.20 and resid > 0.15 and sat > 0.10:
+        # Gate is strict (nearest natural photo in calibration: 0.24);
+        # confidence scales wider so typical illustration clears 0.60.
+        m1 = min((0.25 - n95) / 0.25, 1.0)
+        m2 = min((resid - 0.15) / 0.30, 1.0)
+        m3 = min((sat - 0.10) / 0.30, 1.0)
         return "anime", float(round(0.55 + 0.45 * min(m1, m2, m3), 3))
 
     return "photo", 0.60
