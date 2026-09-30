@@ -26,8 +26,8 @@ class DiagnosticsResult:
     mean_luminance: float = 128.0     # Mean luminance level (0.0 to 255.0)
     backlight_ratio: float = 1.0      # Peripheral-to-center luminance ratio
     backlight_detected: bool = False  # True if central subject is backlit
-    color_cast_kelvin: int = 0        # Recommended white-balance temperature shift (-100 to 100)
-    color_tint_offset: int = 0        # Recommended green-magenta tint shift (-50 to +50)
+    color_cast_kelvin: int = 0        # Recommended white-balance temperature shift (+-50 estimated, +-30 after auto-tune)
+    color_tint_offset: int = 0        # Recommended green-magenta tint shift (+-40 estimated, +-30 after auto-tune)
     color_cast_name: str = "Neutral"  # "Neutral", "Warm", "Cool", "Green", "Magenta"
     haze_index: float = 0.0           # Atmospheric veiling index (0.0=clear, 1.0=dense haze)
     haze_detected: bool = False       # True if haze index exceeds atmospheric threshold
@@ -320,8 +320,10 @@ def estimate_shades_of_gray_illuminant(
     Estimates illuminant color cast using the Minkowski p-norm (Finlayson & Trezzi, 2004
     Shades-of-Gray hypothesis).
 
-    Returns a recommended Bradford CAT16 temperature offset (-100 to +100), optional tint offset (-50 to +50),
-    and cast name.
+    Returns a recommended Bradford CAT16 temperature offset (clamped to
+    -50..+50 here; auto-tune narrows to -30..+30 per the PipelineConfig
+    range), optional tint offset (clamped to -40..+40 here, -30..+30 after
+    auto-tune), and cast name.
 
     Args:
         img_bgr: uint8 BGR image [H, W, 3]
