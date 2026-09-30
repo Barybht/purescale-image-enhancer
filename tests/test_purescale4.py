@@ -962,6 +962,34 @@ class TestPureScale4CliAndGui(unittest.TestCase):
             else:
                 raise e
 
+    def test_gui_completion_lands_in_split_view(self):
+        if not _TK_AVAILABLE:
+            self.skipTest("tkinter not available on this runner")
+        try:
+            import customtkinter  # noqa: F401
+        except ImportError as e:
+            self.skipTest(f"GUI dependencies not installed: {e}")
+        from purescale.gui.app import PureScaleApp
+        from purescale.config import ProcessingResult
+        from PIL import Image
+        try:
+            app = PureScaleApp()
+            app.canvas.set_images(Image.new("RGB", (64, 64)), None)
+            app.view_mode_seg.set("Enhanced")
+            app._on_view_mode_change("Enhanced")
+            bgr = np.full((64, 64, 3), 150, dtype=np.uint8)
+            res = ProcessingResult(image=bgr, latency_ms=12.5,
+                                   backend_name="TEST", mode_name="puredsp")
+            app._on_enhancement_complete(res)
+            self.assertEqual(app.view_mode_seg.get(), "Split View")
+            self.assertEqual(app.canvas.view_mode, "split")
+            app.destroy()
+        except Exception as e:
+            if _is_display_error(e):
+                self.skipTest(f"Headless display not available: {e}")
+            else:
+                raise e
+
     def test_gui_manual_reset_button(self):
         if not _TK_AVAILABLE:
             self.skipTest("tkinter not available on this runner")

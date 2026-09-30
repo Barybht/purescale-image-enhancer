@@ -1137,10 +1137,11 @@ class PureScaleApp(ctk.CTk):
         enh_pil = Image.fromarray(rgb)
         self.canvas.set_images(self.canvas.orig_pil, enh_pil)
 
-        # If currently in Original view mode, switch to Enhanced view mode to display result
-        if self.view_mode_seg.get() == "Original":
-            self.view_mode_seg.set("Enhanced")
-            self._on_view_mode_change("Enhanced")
+        # Completion lands in Split View so the result compares against
+        # the original immediately (replaces the old Original->Enhanced hop).
+        if self.view_mode_seg.get() != "Split View":
+            self.view_mode_seg.set("Split View")
+            self._on_view_mode_change("Split View")
 
         h, w = res.image.shape[:2]
         self._update_res_badge()
