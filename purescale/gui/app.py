@@ -87,7 +87,7 @@ class PureScaleApp(ctk.CTk):
             title_box,
             text="PURESCALE 4.0",
             font=font("mono15b"),
-            text_color=PALETTE["text_title"],
+            text_color=PALETTE["text"],
         ).pack(side="left")
 
         ctk.CTkLabel(

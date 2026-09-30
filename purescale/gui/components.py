@@ -143,8 +143,8 @@ class LabeledSlider(ctk.CTkFrame):
         """Enables or disables the slider and dims text."""
         state = "normal" if enabled else "disabled"
         self.slider.configure(state=state)
-        self.name_label.configure(text_color=PALETTE["text_muted"] if enabled else PALETTE["text_dim"])
-        self.val_label.configure(text_color=PALETTE["accent_bright"] if enabled else PALETTE["text_dim"])
+        self.name_label.configure(text_color=PALETTE["text_muted"] if enabled else PALETTE["text_faint"])
+        self.val_label.configure(text_color=PALETTE["accent_bright"] if enabled else PALETTE["text_faint"])
 
 
 class DiagnosticsHUDCard(ParameterCard):

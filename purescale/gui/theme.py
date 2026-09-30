@@ -11,8 +11,7 @@ import customtkinter as ctk
 PALETTE = {
     # Backgrounds
     "bg_app": "#090d16",      # main window, viewport, segmented wells
-    "bg_bar": "#0d131f",      # top bar, sidebar, status bar
-    "bg_panel": "#0f172a",    # canvas empty/overlay panels
+    "bg_bar": "#0d131f",      # top/side/bottom bars, canvas overlay panels
     # Surfaces
     "surface": "#131b2e",     # cards, buttons at rest, slider tracks
     "surface_hover": "#1e293b",  # button/row hover, secondary buttons
@@ -27,12 +26,10 @@ PALETTE = {
     "go": "#059669",
     "go_hover": "#047857",
     # Text ramp
-    "text_title": "#f8fafc",   # app title
-    "text": "#e2e8f0",         # primary text
+    "text": "#e2e8f0",         # primary text, titles
     "text_soft": "#cbd5e1",    # secondary values
     "text_muted": "#94a3b8",   # labels
-    "text_faint": "#64748b",   # placeholders, disabled
-    "text_dim": "#475569",     # de-emphasized units
+    "text_faint": "#64748b",   # placeholders, disabled, de-emphasized
     # Status
     "ok": "#4ade80",
     "warn": "#facc15",

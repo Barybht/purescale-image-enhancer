@@ -330,7 +330,7 @@ class InteractiveCanvas(tk.Canvas):
             self.create_text(
                 cw, ch,
                 text="Load an image to begin (Ctrl+O)",
-                fill=PALETTE["text_dim"],
+                fill=PALETTE["text_faint"],
                 font=("Consolas", 14, "bold")
             )
             return
@@ -411,7 +411,7 @@ class InteractiveCanvas(tk.Canvas):
             self.create_rectangle(
                 div_screen_x - 90, badge_y - 12,
                 div_screen_x - 10, badge_y + 12,
-                fill=PALETTE["bg_panel"], outline=PALETTE["hover_light"], width=1
+                fill=PALETTE["bg_bar"], outline=PALETTE["hover_light"], width=1
             )
             self.create_text(
                 div_screen_x - 50, badge_y,
@@ -424,7 +424,7 @@ class InteractiveCanvas(tk.Canvas):
             self.create_rectangle(
                 div_screen_x + 10, badge_y - 12,
                 div_screen_x + 90, badge_y + 12,
-                fill=PALETTE["bg_panel"], outline=PALETTE["accent"], width=1
+                fill=PALETTE["bg_bar"], outline=PALETTE["accent"], width=1
             )
             self.create_text(
                 div_screen_x + 50, badge_y,
