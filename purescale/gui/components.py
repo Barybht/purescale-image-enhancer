@@ -2,6 +2,7 @@
 
 from typing import Callable, List, Optional
 import tkinter as tk
+from tkinter import ttk
 import customtkinter as ctk
 from purescale.gui.theme import PALETTE, font
 from tkinter import messagebox
@@ -268,17 +269,38 @@ class PresetPicker(ctk.CTkFrame):
             font=("Consolas", 11),
         )
         self._listbox.pack(side="left", fill="both", expand=True)
-        scroll = tk.Scrollbar(
+        # ttk/club scrollbar: native tk.Scrollbar renders its trough in
+        # system colors on Windows (white at rest). A clam-styled ttk bar
+        # with the arrows removed stays fully themed.
+        style = ttk.Style()
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style_name = "PresetPicker.Vertical.TScrollbar"
+        style.layout(style_name, [(
+            "Vertical.Scrollbar.trough",
+            {"sticky": "ns", "children": [
+                ("Vertical.Scrollbar.thumb", {"expand": "1", "sticky": "nswe"}),
+            ]},
+        )])
+        style.configure(
+            style_name,
+            background=PALETTE["surface_hover"],
+            troughcolor=PALETTE["surface"],
+            borderwidth=0,
+            arrowsize=0,
+            relief="flat",
+        )
+        style.map(
+            style_name,
+            background=[("active", PALETTE["accent"]), ("pressed", PALETTE["accent"])],
+        )
+        scroll = ttk.Scrollbar(
             list_frame,
             orient="vertical",
             command=self._listbox.yview,
-            bg=PALETTE["surface_hover"],
-            troughcolor=PALETTE["surface"],
-            activebackground=PALETTE["accent"],
-            borderwidth=0,
-            highlightthickness=0,
-            elementborderwidth=0,
-            width=14,
+            style=style_name,
         )
         scroll.pack(side="right", fill="y")
         self._listbox.configure(yscrollcommand=scroll.set)
