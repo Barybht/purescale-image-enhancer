@@ -1500,6 +1500,21 @@ class TestPureScale4AutoStyle(unittest.TestCase):
         res = diagnose_image(gray)
         self.assertGreaterEqual(res.noise_sigma, 0.0)
 
+    def test_chroma_category_populated(self):
+        from purescale.dsp.diagnostics import diagnose_image
+
+        rng = np.random.default_rng(31)
+        noisy = np.clip(
+            np.full((64, 64, 3), 128.0) + rng.normal(0, 12.0, (64, 64, 3)),
+            0, 255,
+        ).astype(np.uint8)
+        res = diagnose_image(noisy)
+        # Category tracks the same bands as the estimator output.
+        from purescale.dsp.diagnostics import estimate_chroma_wavelet_noise_mad
+        _, expected_cat = estimate_chroma_wavelet_noise_mad(noisy)
+        self.assertEqual(res.chroma_noise_category, expected_cat)
+        self.assertIn("chroma_noise_category", res.to_dict())
+
     def test_pipeline_manga_routing(self):
         pipeline = PureScalePipeline()
         cfg = PipelineConfig(mode=ProcessingMode.PURE_DSP, scale=1.0, auto_style=True)

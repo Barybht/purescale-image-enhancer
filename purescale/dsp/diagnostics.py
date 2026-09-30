@@ -17,6 +17,7 @@ class DiagnosticsResult:
     noise_sigma: float = 0.0          # Estimated Gaussian noise sigma (0.0 to 100.0)
     noise_category: str = "Clean"     # "Clean", "Low", "Moderate", "Heavy"
     chroma_noise_sigma: float = 0.0   # Estimated chrominance noise sigma (Cb/Cr)
+    chroma_noise_category: str = "Clean"  # Same Clean/Low/Moderate/Heavy bands as luma
     blur_score: float = 0.0           # Optical/motion blur index (0.0=sharp, 1.0=heavily blurred)
     blur_category: str = "Sharp"      # "Sharp", "Acceptable", "Soft", "Blurred"
     entropy: float = 0.0              # Shannon luminance entropy (0.0 to 8.0 bits)
@@ -675,7 +676,7 @@ def diagnose_image(
 
     # 1. Wavelet MAD Noise Estimation (Luma + Chroma)
     noise_sigma, noise_cat = estimate_wavelet_noise_mad(gray)
-    chroma_noise_sigma, _ = estimate_chroma_wavelet_noise_mad(img_bgr)
+    chroma_noise_sigma, chroma_cat = estimate_chroma_wavelet_noise_mad(img_bgr)
 
     # 2. Optical Blur Estimation
     blur_score, blur_cat = estimate_optical_blur(gray)
@@ -702,6 +703,7 @@ def diagnose_image(
         noise_sigma=noise_sigma,
         noise_category=noise_cat,
         chroma_noise_sigma=chroma_noise_sigma,
+        chroma_noise_category=chroma_cat,
         blur_score=blur_score,
         blur_category=blur_cat,
         entropy=entropy,
