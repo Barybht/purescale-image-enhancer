@@ -5,7 +5,7 @@ from typing import Callable, Optional
 import numpy as np
 from PIL import Image, ImageTk
 
-from purescale.gui.theme import PALETTE
+from purescale.gui.theme import PALETTE, font
 
 
 class InteractiveCanvas(tk.Canvas):
@@ -329,9 +329,15 @@ class InteractiveCanvas(tk.Canvas):
             ch = self.winfo_height() / 2
             self.create_text(
                 cw, ch,
-                text="Load an image to begin (Ctrl+O)",
+                text="Drop an image here or press Ctrl+O",
                 fill=PALETTE["text_faint"],
-                font=("Consolas", 14, "bold")
+                font=font("mono14b"),
+            )
+            self.create_text(
+                cw, ch + 28,
+                text="PNG / JPEG / WebP / BMP / TIFF",
+                fill=PALETTE["text_faint"],
+                font=font("mono10b"),
             )
             return
 

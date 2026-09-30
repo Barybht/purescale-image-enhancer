@@ -1164,17 +1164,8 @@ class PureScaleApp(ctk.CTk):
         self.status_label.configure(
             text=f"Done in {res.latency_ms:.1f} ms ({res.backend_name}) | {w}x{h}{faces_str}{style_str}"
         )
-
-        # Completion dialog: success is otherwise silent (status bar only).
-        # Failures already surface via _on_enhancement_error's error dialog.
-        if self.current_orig_bgr is not None:
-            oh, ow = self.current_orig_bgr.shape[:2]
-        else:
-            ow, oh = w, h
-        detail = f"Finished in {res.latency_ms:.1f} ms ({res.backend_name}).\nResolution: {ow}x{oh} -> {w}x{h}."
-        if res.faces_detected > 0:
-            detail += f"\nFaces retouched: {res.faces_detected}."
-        messagebox.showinfo("Enhancement Complete", detail)
+        # No success popup: completion is reported in the status bar and
+        # progress bar (failures still raise an error dialog).
 
     def _on_enhancement_error(self, err: Exception) -> None:
         self.is_processing = False

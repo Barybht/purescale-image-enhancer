@@ -38,6 +38,7 @@ PALETTE = {
 
 _FONTS = {
     "mono15b": ("Consolas", 15, "bold"),
+    "mono14b": ("Consolas", 14, "bold"),
     "mono11b": ("Consolas", 11, "bold"),
     "mono11": ("Consolas", 11, "normal"),
     "mono10b": ("Consolas", 10, "bold"),
