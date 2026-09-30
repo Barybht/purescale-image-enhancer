@@ -805,6 +805,105 @@ class TestPureScale4CliAndGui(unittest.TestCase):
             else:
                 raise e
 
+    def test_gui_image_switch_resets_session_and_controls(self):
+        if not _TK_AVAILABLE:
+            self.skipTest("tkinter not available on this runner")
+        try:
+            import customtkinter  # noqa: F401
+        except ImportError as e:
+            self.skipTest(f"GUI dependencies not installed: {e}")
+        from purescale.gui.app import PureScaleApp
+        try:
+            app = PureScaleApp()
+            app.load_image(self.temp_in)
+
+            # User modifies settings for image 1
+            app._on_preset_change("Low-Light")
+            self.assertEqual(int(app.denoise_slider.get()), 65)
+            app.view_mode_seg.set("Enhanced")
+            app.canvas.set_view_mode("enhanced")
+
+            # User opens image 2
+            app.load_image(self.temp_in)
+
+            # View mode resets to Original for the fresh un-enhanced image
+            self.assertEqual(app.view_mode_seg.get(), "Original")
+            self.assertEqual(app.canvas.view_mode, "original")
+            self.assertIsNone(app.current_enh_bgr)
+            self.assertEqual(app.progress_bar.get(), 0.0)
+
+            # Parameters reset to Balanced baseline (denoise 35, not 65)
+            self.assertEqual(app.preset_opt.get(), "Balanced")
+            self.assertEqual(int(app.denoise_slider.get()), 35)
+
+            app.destroy()
+        except Exception as e:
+            if _is_display_error(e):
+                self.skipTest(f"Headless display not available: {e}")
+            else:
+                raise e
+
+    def test_gui_auto_style_selects_new_pic_style(self):
+        if not _TK_AVAILABLE:
+            self.skipTest("tkinter not available on this runner")
+        try:
+            import customtkinter  # noqa: F401
+        except ImportError as e:
+            self.skipTest(f"GUI dependencies not installed: {e}")
+        from purescale.gui.app import PureScaleApp
+        from purescale.config import DiagnosticsResult
+        try:
+            app = PureScaleApp()
+
+            # Picture 1: Anime detected
+            diag_anime = DiagnosticsResult(suggested_style="anime", style_confidence=0.92)
+            app._sync_routed_style(diag_anime)
+            self.assertEqual(app.style_seg.get(), "Anime")
+
+            # Picture 2: Switched to Photo -> style selector must switch to Photo
+            diag_photo = DiagnosticsResult(suggested_style="photo", style_confidence=0.88)
+            app._sync_routed_style(diag_photo)
+            self.assertEqual(app.style_seg.get(), "Photo")
+
+            # Picture 3: Switched back to Anime -> style selector must switch back to Anime
+            app._sync_routed_style(diag_anime)
+            self.assertEqual(app.style_seg.get(), "Anime")
+
+            app.destroy()
+        except Exception as e:
+            if _is_display_error(e):
+                self.skipTest(f"Headless display not available: {e}")
+            else:
+                raise e
+
+    def test_gui_manual_reset_button(self):
+        if not _TK_AVAILABLE:
+            self.skipTest("tkinter not available on this runner")
+        try:
+            import customtkinter  # noqa: F401
+        except ImportError as e:
+            self.skipTest(f"GUI dependencies not installed: {e}")
+        from purescale.gui.app import PureScaleApp
+        try:
+            app = PureScaleApp()
+            app.preset_opt.set("Landscape")
+            app._on_preset_change("Landscape")
+            self.assertEqual(app.preset_opt.get(), "Landscape")
+            self.assertTrue(bool(app.dehaze_switch.get()))
+
+            # Click Reset button
+            app._on_reset_click()
+            self.assertEqual(app.preset_opt.get(), "Balanced")
+            self.assertFalse(bool(app.dehaze_switch.get()))
+            self.assertEqual(int(app.denoise_slider.get()), 35)
+
+            app.destroy()
+        except Exception as e:
+            if _is_display_error(e):
+                self.skipTest(f"Headless display not available: {e}")
+            else:
+                raise e
+
 
 
 class TestPureScale4GuiScrolling(unittest.TestCase):

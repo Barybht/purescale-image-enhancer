@@ -320,8 +320,11 @@ class PureScaleApp(ctk.CTk):
         )
         preset_card.pack(fill="x", padx=12, pady=4)
 
+        preset_row = ctk.CTkFrame(preset_card, fg_color="transparent")
+        preset_row.pack(fill="x", padx=8, pady=(4, 8))
+
         self.preset_opt = ctk.CTkOptionMenu(
-            preset_card,
+            preset_row,
             values=[name.title() for name in PRESETS],
             command=self._on_preset_change,
             fg_color="#131b2e",
@@ -338,7 +341,20 @@ class PureScaleApp(ctk.CTk):
             dropdown_font=ctk.CTkFont(family="Segoe UI", size=11),
         )
         self.preset_opt.set("Balanced")
-        self.preset_opt.pack(fill="x", padx=8, pady=(4, 8))
+        self.preset_opt.pack(side="left", fill="x", expand=True, padx=(0, 6))
+
+        self.btn_reset_params = ctk.CTkButton(
+            preset_row,
+            text="Reset",
+            width=54,
+            height=32,
+            command=self._on_reset_click,
+            fg_color="#1e293b",
+            hover_color="#334155",
+            text_color="#94a3b8",
+            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
+        )
+        self.btn_reset_params.pack(side="right")
         # Backward-compat alias (older code/tests reference preset_seg).
         self.preset_seg = self.preset_opt
 
@@ -715,6 +731,13 @@ class PureScaleApp(ctk.CTk):
 
         threading.Thread(target=diag_worker, daemon=True).start()
 
+    def _on_reset_click(self) -> None:
+        """Resets all configuration sliders and preset to Balanced baseline."""
+        self.preset_opt.set("Balanced")
+        self._on_preset_change("Balanced")
+        if self.auto_style_switch.get() and self.current_diagnostics:
+            self._sync_routed_style(self.current_diagnostics)
+
     def _open_file_dialog(self) -> None:
         """Prompts user to select image file and loads it."""
         path = filedialog.askopenfilename(
@@ -726,7 +749,10 @@ class PureScaleApp(ctk.CTk):
         )
         if not path:
             return
+        self.load_image(path)
 
+    def load_image(self, path: str) -> bool:
+        """Loads an image into the application session, resetting viewport and parameters."""
         try:
             from purescale.cli import load_image_with_alpha
             bgr, alpha, exif, icc = load_image_with_alpha(path, return_meta=True)
@@ -736,6 +762,17 @@ class PureScaleApp(ctk.CTk):
             self.current_exif = exif
             self.current_icc_profile = icc
             self.current_enh_bgr = None
+            self.current_diagnostics = None
+            self.hud_card.update_diagnostics(None)
+
+            # Reset view mode to Original for the un-enhanced new image
+            self.view_mode_seg.set("Original")
+            self.canvas.set_view_mode("original")
+            self.split_ctrl_frame.pack_forget()
+
+            # Reset parameters & preset to clean baseline for the new picture
+            self.preset_opt.set("Balanced")
+            self._on_preset_change("Balanced")
 
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
             orig_pil = Image.fromarray(rgb)
@@ -745,10 +782,12 @@ class PureScaleApp(ctk.CTk):
             self.status_label.configure(text=f"Loaded: {os.path.basename(path)} ({w}x{h})")
             self.progress_bar.set(0.0)
 
-            # Analyze image signal immediately
+            # Analyze image signal immediately (will auto-select style if auto_style_switch is on)
             self._run_quick_diagnostics_async(bgr)
+            return True
         except (OSError, IOError, ValueError, cv2.error) as err:
             messagebox.showerror("Image Load Error", f"Could not load image:\n{err}")
+            return False
 
     def _apply_diagnostics_to_ui(self, diag: DiagnosticsResult) -> None:
         """Synchronizes UI sliders with auto-tuned parameters."""
@@ -921,16 +960,17 @@ class PureScaleApp(ctk.CTk):
     def _sync_routed_style(self, diag: DiagnosticsResult) -> None:
         """Reflects auto-routed weights style in the style selector.
 
-        Only registry (weights) styles have segmented values; a manga
-        routing keeps photo weights, so the selector correctly stays put
-        while the HUD row and status bar report the DSP profile.
+        If the image is detected as anime/illustration with high confidence,
+        selects 'Anime'. If photo with high confidence, selects 'Photo'.
+        If manga, keeps current/photo weights while HUD and status reflect Manga.
         """
-        routed = self._routed_style_label(diag)
-        if routed is None:
-            return
-        labels = [s.title() for s in valid_sr_styles()]
-        if routed in labels:
-            self.style_seg.set(routed)
+        conf = float(getattr(diag, "style_confidence", 0.0) or 0.0)
+        name = str(getattr(diag, "suggested_style", "photo") or "photo").lower()
+        if conf >= AUTO_STYLE_CONFIDENCE:
+            if name in ("anime", "art"):
+                self.style_seg.set("Anime")
+            elif name == "photo":
+                self.style_seg.set("Photo")
 
     def _on_enhancement_complete(self, res: ProcessingResult) -> None:
         self.is_processing = False
@@ -942,12 +982,18 @@ class PureScaleApp(ctk.CTk):
         if res.diagnostics:
             self.current_diagnostics = res.diagnostics
             self.hud_card.update_diagnostics(res.diagnostics)
-            self._sync_routed_style(res.diagnostics)
+            if self.auto_style_switch.get():
+                self._sync_routed_style(res.diagnostics)
 
         # Convert to PIL and update canvas
         rgb = cv2.cvtColor(res.image, cv2.COLOR_BGR2RGB)
         enh_pil = Image.fromarray(rgb)
         self.canvas.set_images(self.canvas.orig_pil, enh_pil)
+
+        # If currently in Original view mode, switch to Enhanced view mode to display result
+        if self.view_mode_seg.get() == "Original":
+            self.view_mode_seg.set("Enhanced")
+            self._on_view_mode_change("Enhanced")
 
         h, w = res.image.shape[:2]
         faces_str = f" | {res.faces_detected} faces" if res.faces_detected > 0 else ""
