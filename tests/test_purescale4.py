@@ -997,6 +997,13 @@ def _style_probe(kind: str) -> np.ndarray:
         rng = np.random.default_rng(17)
         ink = np.clip(ink.astype(np.float32) + rng.normal(0, 2.0, ink.shape), 0, 255).astype(np.uint8)
         return np.repeat(ink[:, :, np.newaxis], 3, axis=2)
+    if kind == "webtoon":
+        webtoon = np.full((128, 128, 3), [245, 245, 245], dtype=np.uint8)
+        webtoon[15:60, 15:110] = [60, 130, 220]
+        cv2.rectangle(webtoon, (15, 15), (110, 60), (20, 20, 20), 2)
+        webtoon[70:115, 15:110] = [80, 200, 120]
+        cv2.rectangle(webtoon, (15, 70), (110, 115), (20, 20, 20), 2)
+        return webtoon
     # noisy photo gradient
     x = np.linspace(0, 1, 128, dtype=np.float32)[None, :].repeat(128, axis=0)
     base = np.stack([x * 180 + 30, x * 150 + 40, (1 - x) * 120 + 30], axis=-1)
@@ -1010,6 +1017,10 @@ class TestPureScale4AutoStyle(unittest.TestCase):
         from purescale.dsp.diagnostics import classify_content_style
 
         style, conf = classify_content_style(_style_probe("cartoon"))
+        self.assertEqual(style, "anime")
+        self.assertGreaterEqual(conf, 0.60)
+
+        style, conf = classify_content_style(_style_probe("webtoon"))
         self.assertEqual(style, "anime")
         self.assertGreaterEqual(conf, 0.60)
 
@@ -1044,10 +1055,29 @@ class TestPureScale4AutoStyle(unittest.TestCase):
         self.assertEqual(style, "manga")
         self.assertGreaterEqual(conf, 0.60)
 
+    def test_classifier_grayscale_photos(self):
+        """Ensures continuous-tone B&W photos do not get misclassified as manga."""
+        from purescale.dsp.diagnostics import classify_content_style
+
+        fixtures_dir = os.path.join(os.path.dirname(__file__), "fixtures")
+        for fname in ("golden_photo.png", "golden_edge.png", "golden_texture.png"):
+            path = os.path.join(fixtures_dir, fname)
+            if not os.path.exists(path):
+                continue
+            bgr = cv2.imread(path)
+            gray_2d = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+            gray_3d = cv2.cvtColor(gray_2d, cv2.COLOR_GRAY2BGR)
+
+            style_2d, _ = classify_content_style(gray_2d)
+            self.assertEqual(style_2d, "photo", f"2D grayscale {fname} misclassified as {style_2d}")
+
+            style_3d, _ = classify_content_style(gray_3d)
+            self.assertEqual(style_3d, "photo", f"3D grayscale {fname} misclassified as {style_3d}")
+
     def test_classifier_determinism(self):
         from purescale.dsp.diagnostics import classify_content_style
 
-        for kind in ("cartoon", "manga", "photo"):
+        for kind in ("cartoon", "webtoon", "manga", "bw-ink", "photo"):
             img = _style_probe(kind)
             self.assertEqual(classify_content_style(img), classify_content_style(img))
 

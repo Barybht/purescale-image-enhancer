@@ -297,22 +297,27 @@ style profile > library defaults: a profile only fills fields still at
 defaults, so user intent always wins and photo behavior cannot regress.
 
 Content-aware routing (`--auto-style`, implied by `--auto`) classifies the
-input before the profile step from three 160px-proxy signals: mean HSV
-saturation, quantized unique-color fraction, 95%-coverage color
+input before the profile step from cheap 160px-proxy signals: mean HSV
+saturation, quantized unique-color fraction (5 bits/channel), 95%-coverage color
 concentration (fraction of distinct colors covering 95% of pixels —
 robust to the JPEG noise that defeats raw distinct counts on real
-files), and high-pass residual energy ratio. Near-zero saturation with
-few quantized colors and genuine structure routes to manga (B&W
-ink/halftones), as does dot-scale energy above 0.75 regardless of
+files), high-pass residual energy ratio (dot/line-scale structure vs broadband variance),
+and extreme tonal occupancy $\text{extreme\_tones} = \frac{1}{N} \sum (\mathbb{I}[I_i > 215] + \mathbb{I}[I_i < 45])$
+measuring paper-white vs ink-black coverage.
+
+Near-zero saturation with few quantized colors, genuine structure, and extreme
+tonal occupancy $> 0.50$ routes to manga (B&W ink line-art and halftones; the extreme-tone
+gate strictly rejects continuous-tone B&W photographs where midtones dominate and
+extreme tones remain $< 0.15$), as does dot-scale energy above 0.75 regardless of
 color (color halftones; noisy photos peak near 0.48 and stay photo);
 few distinct colors with genuine ink-edge energy — a 0.20 residual floor
 rejects clean/blurred gradients whose smoothness mimics flat color — and
-real color routes to anime, as does concentrated color usage (n95 < 0.20)
-with structure and color (painterly illustration); everything else stays
-photo. Calibrated against 60 real-world files (5 illustrated ground
-truths, zero false positives on the remaining 55). Re-routing needs confidence >= 0.60
-and never overrides an explicit `--style`; manga content sets the DSP
-profile only, since no manga weights exist. Cost is ~0.3 ms (VGA) to
+real color routes to anime, as does concentrated color usage ($n_{95} < 0.20$)
+with structure and color (painterly illustration and webtoons); everything else stays
+photo. Calibrated against real-world test suites (illustrated ground
+truths, zero false positives on continuous-tone monochrome and color photography).
+Re-routing needs confidence $\ge 0.60$ and never overrides an explicit `--style`;
+manga content sets the DSP profile only, since no manga weights exist. Cost is ~0.3 ms (VGA) to
 ~1.5 ms (1080p).
 
 ---
