@@ -294,17 +294,13 @@ class PureScaleApp(ctk.CTk):
             self.res_badge.configure(text=f"{ow}x{oh}", text_color=PALETTE["accent_bright"])
 
     def _on_sidebar_tab_change(self, tab_name: str) -> None:
-        """Shows selected category frame or all frames, and scrolls to top."""
+        """Shows the selected category frame and scrolls to top."""
         for frame in self._tab_frames.values():
             frame.pack_forget()
 
-        if tab_name == "All":
-            for frame in self._tab_frames.values():
-                frame.pack(fill="x")
-        else:
-            active_frame = self._tab_frames.get(tab_name)
-            if active_frame:
-                active_frame.pack(fill="x")
+        active_frame = self._tab_frames.get(tab_name)
+        if active_frame:
+            active_frame.pack(fill="x")
 
         self.update_idletasks()
         try:
@@ -366,7 +362,7 @@ class PureScaleApp(ctk.CTk):
         # Categorized Inspector Tab Switcher
         self.tab_seg = ctk.CTkSegmentedButton(
             self.sidebar,
-            values=["Profiles", "Detail", "Clean", "Color", "Portrait", "All"],
+            values=["Profiles", "Detail", "Clean", "Color", "Portrait"],
             command=self._on_sidebar_tab_change,
             selected_color=PALETTE["accent"],
             selected_hover_color=PALETTE["accent_hover"],
