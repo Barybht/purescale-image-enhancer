@@ -31,6 +31,7 @@ from purescale.dsp.diagnostics import (
     estimate_shades_of_gray_illuminant,
     estimate_atmospheric_haze,
     estimate_jpeg_blocking,
+    classify_content_style,
 )
 
 from purescale.dsp.pyramid import (
@@ -74,6 +75,7 @@ __all__ = [
     "estimate_shades_of_gray_illuminant",
     "estimate_atmospheric_haze",
     "estimate_jpeg_blocking",
+    "classify_content_style",
 
     "multiscale_laplacian_filter",
     "build_gaussian_pyramid",
