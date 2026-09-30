@@ -204,7 +204,8 @@ class DiagnosticsHUDCard(ParameterCard):
         # Noise
         noise_color = "#4ade80" if diag.noise_sigma < 3.0 else ("#facc15" if diag.noise_sigma < 8.0 else "#f87171")
         chroma_sigma = float(getattr(diag, "chroma_noise_sigma", 0.0) or 0.0)
-        if chroma_sigma >= 3.0:
+        # Same >= 2.0 display gate as the summary table (Clean band edge).
+        if chroma_sigma >= 2.0:
             self.noise_val.configure(text=f"{diag.noise_sigma:.1f}Y/{chroma_sigma:.1f}C [{diag.noise_category}]", text_color=noise_color)
         else:
             self.noise_val.configure(text=f"{diag.noise_sigma:.1f} [{diag.noise_category}]", text_color=noise_color)
