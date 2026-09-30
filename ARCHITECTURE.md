@@ -12,7 +12,7 @@ PureScale 4.0 unifies:
 5. **Multi-Cue Semantic Region Guidance**: Soft continuous probability masks for Sky, Foliage, Skin, Shadow, and Structure.
 6. **Dual Hardware Acceleration**: Microsoft DirectML (DirectX 12) for AMD Radeon GPU neural execution and Zen 4 CPU AVX-512 SIMD for analytical DSP.
 
-Evaluated on commodity laptop hardware (AMD Ryzen 5 PRO 7640HS + Radeon 760M iGPU), PureScale 4.0 processes 1080p imagery in $\sim 2.0\text{ s}$ in PureDSP mode at 1.0x scale ($\sim 5\text{ s}$ at 2.0x scale to 4K, see `BENCH.md` and `bench/bench.py`) with 100% bitwise determinism and zero hallucination risk.
+Evaluated on commodity laptop hardware (AMD Ryzen 5 PRO 7640HS + Radeon 760M iGPU), PureScale 4.0 processes 1080p imagery in $\sim 2.0\text{ s}$ in PureDSP mode at 1.0x scale ($\sim 5\text{ s}$ at 2.0x scale to 4K, see `BENCH.md` and `bench/bench.py`) with run-to-run determinism on a fixed host/build (golden-gated at SSIM $> 0.999$, PSNR $> 60$ dB) and zero hallucination risk.
 
 ---
 
@@ -358,11 +358,15 @@ Evaluated across commodity laptop hardware (AMD Ryzen 5 PRO 7640HS + Radeon 760M
 
 | Architecture | Paradigm | 1080p Latency (1.0x scale) | Peak Memory | Determinism | Hallucination Risk |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **PureScale 4.0 (PureDSP)** | Analytical Multiscale DSP | **~2.0 s** | **~62 MB** | **100% Bitwise** | **0% (None)** |
+| **PureScale 4.0 (PureDSP)** | Analytical Multiscale DSP | **~2.0 s** | **~62 MB** | **Deterministic\*** | **0% (None)** |
 | **PureScale 4.0 (Hybrid)** | AI + Multiscale DSP | **~420 ms** | **~195 MB** | High Reproducibility | Minimal |
 | **PureScale 4.0 (Neural AI)**| Compact Edge CNN | **~360 ms** | **~145 MB** | DirectML Consistent | Low |
 | **Real-ESRGAN (Full CPU)** | 23-Block RRDBNet | ~14,200 ms | ~1,850 MB | Non-deterministic | Moderate-High |
 | **Stable Diffusion Upscaler** | Latent Diffusion | ~48,000 ms | ~4,200 MB | Stochastic | Extreme |
+
+\*Run-to-run on a fixed host/build; cross-platform reproducibility is gated
+by golden fixtures at SSIM $> 0.999$ / PSNR $> 60$ dB (floating-point
+reductions are last-ulp-sensitive across SIMD paths and library builds).
 
 ---
 

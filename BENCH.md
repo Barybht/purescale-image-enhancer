@@ -151,9 +151,9 @@ Measured on AMD Ryzen 5 PRO 7640HS (Zen 4 CPU, AVX-512 / AVX2):
 
 - **Quality gates** (`test_local_tone_proxy_consistency`): Exceeds gating
   thresholds (PSNR > 35 dB, SSIM > 0.98), achieving > 54 dB PSNR and > 0.998 SSIM
-  with 100% bitwise determinism ($L_\infty = 0$). Proxy latency is
-  resize-dominated, so faster hosts report a smaller speedup ratio at equal
-  or better quality.
+  deterministically ($L_\infty = 0$ across runs on the same host/build).
+  Proxy latency is resize-dominated, so faster hosts report a smaller
+  speedup ratio at equal or better quality.
 
 ### Style Profiles: Per-Style Stage Costs (PureDSP, 320x240, warmed-up host)
 
@@ -175,6 +175,6 @@ Style profiles skip whole stages, so non-photo styles are also faster:
 2. **Multiscale Local Laplacian Filtering**:
    Vectorized Burt-Adelson Gaussian/Laplacian pyramid construction with border reflection achieves sub-70ms execution on full 1080p frames, providing halo-free micro-texture and structural contour synthesis.
 
-3. **Bitwise Determinism Invariance**:
-   PureDSP executes with bitwise determinism ($L_\infty = 0$) across independent runs, guaranteed through `np.clip(np.rint(...), 0.0, 255.0).astype(np.uint8)` round-half-up integer quantization.
+3. **Run-to-Run Determinism**:
+   PureDSP executes deterministically ($L_\infty = 0$) across independent runs on the same host/build, enforced through `np.clip(np.rint(...), 0.0, 255.0).astype(np.uint8)` round-half-up integer quantization; cross-platform reproducibility is golden-gated at SSIM > 0.999 / PSNR > 60 dB.
 

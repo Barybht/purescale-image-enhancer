@@ -39,7 +39,7 @@ PureScale 4.0 is an autonomous, multiscale computational vision and edge neural 
 
 | Mode | Technology Stack | Hardware Target | Latency | Primary Advantage |
 | :--- | :--- | :--- | :--- | :--- |
-| **PureDSP** | EASU + Laplacian Pyramids + Dehaze + CAS + SWF + BIMEF + Oklab + CAT16 | AMD Zen 4 CPU (AVX-512) | **~0.7–5.0 s (resolution-dependent)** | 100% bitwise deterministic, zero neural weights, zero hallucination. |
+| **PureDSP** | EASU + Laplacian Pyramids + Dehaze + CAS + SWF + BIMEF + Oklab + CAT16 | AMD Zen 4 CPU (AVX-512) | **~0.7–5.0 s (resolution-dependent)** | Deterministic (fixed host), zero neural weights, zero hallucination. |
 | **Neural AI** | Real-ESRGAN General x4v3 (~4.87 MB ONNX) + Laplacian Pyramids | AMD Radeon 760M (DirectML GPU) | ~350-500 ms | Deep perceptual edge synthesis and compression artifact removal. |
 | **Hybrid** | Neural Super-Resolution + Multiscale Pyramids + Pinned BIMEF + Oklab + CAS | DirectML GPU + Zen CPU | ~400-600 ms | Neural edge reconstruction with pure mathematical color science and halo-free micro-clarity. |
 
