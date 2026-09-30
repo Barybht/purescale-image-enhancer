@@ -5,6 +5,8 @@ from typing import Callable, Optional
 import numpy as np
 from PIL import Image, ImageTk
 
+from purescale.gui.theme import PALETTE
+
 
 class InteractiveCanvas(tk.Canvas):
     """
@@ -13,7 +15,7 @@ class InteractiveCanvas(tk.Canvas):
     """
 
     def __init__(self, master, **kwargs):
-        kwargs.setdefault("bg", "#090d16")
+        kwargs.setdefault("bg", PALETTE["bg_app"])
         kwargs.setdefault("highlightthickness", 0)
         super().__init__(master, **kwargs)
 
@@ -328,7 +330,7 @@ class InteractiveCanvas(tk.Canvas):
             self.create_text(
                 cw, ch,
                 text="Load an image to begin (Ctrl+O)",
-                fill="#475569",
+                fill=PALETTE["text_dim"],
                 font=("Consolas", 14, "bold")
             )
             return
@@ -385,20 +387,20 @@ class InteractiveCanvas(tk.Canvas):
 
         if 0 <= div_screen_x <= cw and bottom_y > top_y:
             # Main Divider Line with glow
-            self.create_line(div_screen_x, top_y, div_screen_x, bottom_y, fill="#0284c7", width=4)
-            self.create_line(div_screen_x, top_y, div_screen_x, bottom_y, fill="#38bdf8", width=2)
+            self.create_line(div_screen_x, top_y, div_screen_x, bottom_y, fill=PALETTE["accent"], width=4)
+            self.create_line(div_screen_x, top_y, div_screen_x, bottom_y, fill=PALETTE["accent_bright"], width=2)
 
             # Center Interactive Circular Handle
             center_y = (top_y + bottom_y) // 2
             self.create_oval(
                 div_screen_x - 16, center_y - 16,
                 div_screen_x + 16, center_y + 16,
-                fill="#0d131f", outline="#38bdf8", width=2
+                fill=PALETTE["bg_bar"], outline=PALETTE["accent_bright"], width=2
             )
             self.create_text(
                 div_screen_x, center_y,
                 text="< | >",
-                fill="#38bdf8",
+                fill=PALETTE["accent_bright"],
                 font=("Consolas", 8, "bold")
             )
 
@@ -409,12 +411,12 @@ class InteractiveCanvas(tk.Canvas):
             self.create_rectangle(
                 div_screen_x - 90, badge_y - 12,
                 div_screen_x - 10, badge_y + 12,
-                fill="#0f172a", outline="#334155", width=1
+                fill=PALETTE["bg_panel"], outline=PALETTE["hover_light"], width=1
             )
             self.create_text(
                 div_screen_x - 50, badge_y,
                 text="ORIGINAL",
-                fill="#94a3b8",
+                fill=PALETTE["text_muted"],
                 font=("Consolas", 9, "bold")
             )
 
@@ -422,11 +424,11 @@ class InteractiveCanvas(tk.Canvas):
             self.create_rectangle(
                 div_screen_x + 10, badge_y - 12,
                 div_screen_x + 90, badge_y + 12,
-                fill="#0f172a", outline="#0284c7", width=1
+                fill=PALETTE["bg_panel"], outline=PALETTE["accent"], width=1
             )
             self.create_text(
                 div_screen_x + 50, badge_y,
                 text="ENHANCED",
-                fill="#38bdf8",
+                fill=PALETTE["accent_bright"],
                 font=("Consolas", 9, "bold")
             )

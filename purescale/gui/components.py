@@ -2,6 +2,7 @@
 
 from typing import Callable, Optional
 import customtkinter as ctk
+from purescale.gui.theme import PALETTE, font
 from tkinter import messagebox
 
 from purescale.config import AUTO_STYLE_CONFIDENCE, DiagnosticsResult
@@ -11,9 +12,9 @@ class ParameterCard(ctk.CTkFrame):
     """Card container with 1px border, header label, technical badge, and (?) help."""
 
     def __init__(self, master, title: str, badge: str = "", help_text: str = "", **kwargs):
-        kwargs.setdefault("fg_color", "#131b2e")
+        kwargs.setdefault("fg_color", PALETTE["surface"])
         kwargs.setdefault("border_width", 1)
-        kwargs.setdefault("border_color", "#202b3f")
+        kwargs.setdefault("border_color", PALETTE["border"])
         kwargs.setdefault("corner_radius", 6)
         super().__init__(master, **kwargs)
 
@@ -23,8 +24,8 @@ class ParameterCard(ctk.CTkFrame):
         self.title_label = ctk.CTkLabel(
             self.header_frame,
             text=title,
-            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
-            text_color="#e2e8f0",
+            font=font("mono11b"),
+            text_color=PALETTE["text"],
         )
         self.title_label.pack(side="left")
 
@@ -39,10 +40,10 @@ class ParameterCard(ctk.CTkFrame):
                 corner_radius=10,
                 fg_color="transparent",
                 border_width=1,
-                border_color="#38bdf8",
-                text_color="#38bdf8",
-                hover_color="#1e293b",
-                font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
+                border_color=PALETTE["accent_bright"],
+                text_color=PALETTE["accent_bright"],
+                hover_color=PALETTE["surface_hover"],
+                font=font("mono10b"),
                 command=self._show_help,
             )
             self.help_btn.pack(side="right", padx=(6, 0))
@@ -51,8 +52,8 @@ class ParameterCard(ctk.CTkFrame):
             self.badge_label = ctk.CTkLabel(
                 self.header_frame,
                 text=f"[{badge}]",
-                font=ctk.CTkFont(family="Consolas", size=9, weight="bold"),
-                text_color="#38bdf8",
+                font=font("mono9b"),
+                text_color=PALETTE["accent_bright"],
             )
             self.badge_label.pack(side="right")
 
@@ -88,16 +89,16 @@ class LabeledSlider(ctk.CTkFrame):
         self.name_label = ctk.CTkLabel(
             top_row,
             text=label,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
-            text_color="#94a3b8",
+            font=font("ui11"),
+            text_color=PALETTE["text_muted"],
         )
         self.name_label.pack(side="left")
 
         self.val_label = ctk.CTkLabel(
             top_row,
             text=f"{default_val:.2f}" if is_float else str(int(default_val)),
-            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
-            text_color="#38bdf8",
+            font=font("mono11b"),
+            text_color=PALETTE["accent_bright"],
         )
         self.val_label.pack(side="right")
 
@@ -110,10 +111,10 @@ class LabeledSlider(ctk.CTkFrame):
             to=to,
             number_of_steps=steps,
             command=self._on_change,
-            fg_color="#1e293b",
-            progress_color="#0284c7",
-            button_color="#38bdf8",
-            button_hover_color="#7dd3fc",
+            fg_color=PALETTE["surface_hover"],
+            progress_color=PALETTE["accent"],
+            button_color=PALETTE["accent_bright"],
+            button_hover_color=PALETTE["accent_lightest"],
             height=16,
         )
         self.slider.set(default_val)
@@ -142,8 +143,8 @@ class LabeledSlider(ctk.CTkFrame):
         """Enables or disables the slider and dims text."""
         state = "normal" if enabled else "disabled"
         self.slider.configure(state=state)
-        self.name_label.configure(text_color="#94a3b8" if enabled else "#475569")
-        self.val_label.configure(text_color="#38bdf8" if enabled else "#475569")
+        self.name_label.configure(text_color=PALETTE["text_muted"] if enabled else PALETTE["text_dim"])
+        self.val_label.configure(text_color=PALETTE["accent_bright"] if enabled else PALETTE["text_dim"])
 
 
 class DiagnosticsHUDCard(ParameterCard):
@@ -173,9 +174,9 @@ class DiagnosticsHUDCard(ParameterCard):
         def create_metric_row(label_text: str):
             row = ctk.CTkFrame(hud_frame, fg_color="transparent")
             row.pack(fill="x", pady=1)
-            lbl = ctk.CTkLabel(row, text=label_text, font=ctk.CTkFont(family="Segoe UI", size=10), text_color="#94a3b8")
+            lbl = ctk.CTkLabel(row, text=label_text, font=font("ui10"), text_color=PALETTE["text_muted"])
             lbl.pack(side="left")
-            val = ctk.CTkLabel(row, text="--", font=ctk.CTkFont(family="Consolas", size=10, weight="bold"), text_color="#38bdf8")
+            val = ctk.CTkLabel(row, text="--", font=font("mono10b"), text_color=PALETTE["accent_bright"])
             val.pack(side="right")
             return val
 
@@ -191,18 +192,18 @@ class DiagnosticsHUDCard(ParameterCard):
     def update_diagnostics(self, diag: Optional[DiagnosticsResult]) -> None:
         """Refreshes telemetry values on HUD."""
         if diag is None:
-            self.noise_val.configure(text="--", text_color="#64748b")
-            self.blur_val.configure(text="--", text_color="#64748b")
-            self.entropy_val.configure(text="--", text_color="#64748b")
-            self.cast_val.configure(text="--", text_color="#64748b")
-            self.light_val.configure(text="--", text_color="#64748b")
-            self.haze_val.configure(text="--", text_color="#64748b")
-            self.style_val.configure(text="--", text_color="#64748b")
-            self.scene_val.configure(text="--", text_color="#64748b")
+            self.noise_val.configure(text="--", text_color=PALETTE["text_faint"])
+            self.blur_val.configure(text="--", text_color=PALETTE["text_faint"])
+            self.entropy_val.configure(text="--", text_color=PALETTE["text_faint"])
+            self.cast_val.configure(text="--", text_color=PALETTE["text_faint"])
+            self.light_val.configure(text="--", text_color=PALETTE["text_faint"])
+            self.haze_val.configure(text="--", text_color=PALETTE["text_faint"])
+            self.style_val.configure(text="--", text_color=PALETTE["text_faint"])
+            self.scene_val.configure(text="--", text_color=PALETTE["text_faint"])
             return
 
         # Noise
-        noise_color = "#4ade80" if diag.noise_sigma < 3.0 else ("#facc15" if diag.noise_sigma < 8.0 else "#f87171")
+        noise_color = PALETTE["ok"] if diag.noise_sigma < 3.0 else (PALETTE["warn"] if diag.noise_sigma < 8.0 else PALETTE["err"])
         chroma_sigma = float(getattr(diag, "chroma_noise_sigma", 0.0) or 0.0)
         # Same >= 2.0 display gate as the summary table (Clean band edge).
         if chroma_sigma >= 2.0:
@@ -211,39 +212,39 @@ class DiagnosticsHUDCard(ParameterCard):
             self.noise_val.configure(text=f"{diag.noise_sigma:.1f} [{diag.noise_category}]", text_color=noise_color)
 
         # Blur
-        blur_color = "#4ade80" if diag.blur_score < 0.3 else ("#facc15" if diag.blur_score < 0.6 else "#f87171")
+        blur_color = PALETTE["ok"] if diag.blur_score < 0.3 else (PALETTE["warn"] if diag.blur_score < 0.6 else PALETTE["err"])
         self.blur_val.configure(text=f"{diag.blur_score:.2f} [{diag.blur_category}]", text_color=blur_color)
 
         # Entropy
-        self.entropy_val.configure(text=f"{diag.entropy:.1f} bits ({diag.dynamic_range} lvls)", text_color="#38bdf8")
+        self.entropy_val.configure(text=f"{diag.entropy:.1f} bits ({diag.dynamic_range} lvls)", text_color=PALETTE["accent_bright"])
 
         # White Balance (CAT16 Temp / Tint)
         tint_val = int(getattr(diag, "color_tint_offset", 0) or 0)
-        cast_color = "#4ade80" if (diag.color_cast_kelvin == 0 and tint_val == 0) else "#38bdf8"
+        cast_color = PALETTE["ok"] if (diag.color_cast_kelvin == 0 and tint_val == 0) else PALETTE["accent_bright"]
         self.cast_val.configure(text=f"{diag.color_cast_kelvin:+d}K/{tint_val:+d}T [{diag.color_cast_name}]", text_color=cast_color)
 
         # Lighting Geometry (Backlight ratio)
         backlight = bool(getattr(diag, "backlight_detected", False))
         ratio = float(getattr(diag, "backlight_ratio", 1.0) or 1.0)
-        light_color = "#facc15" if backlight else "#4ade80"
+        light_color = PALETTE["warn"] if backlight else PALETTE["ok"]
         self.light_val.configure(text=f"{'Backlit' if backlight else 'Balanced'} [{ratio:.1f}x]", text_color=light_color)
 
         # Haze
-        haze_color = "#f87171" if diag.haze_detected else "#4ade80"
+        haze_color = PALETTE["err"] if diag.haze_detected else PALETTE["ok"]
         haze_text = f"{diag.haze_index:.2f} [{'HAZE' if diag.haze_detected else 'CLEAR'}]"
         self.haze_val.configure(text=haze_text, text_color=haze_color)
 
         # Style (amber when below the auto-routing threshold: shown but not applied)
         style_conf = float(getattr(diag, "style_confidence", 0.0) or 0.0)
         style_name = str(getattr(diag, "suggested_style", "photo") or "photo")
-        style_color = "#38bdf8" if style_conf >= AUTO_STYLE_CONFIDENCE else "#facc15"
+        style_color = PALETTE["accent_bright"] if style_conf >= AUTO_STYLE_CONFIDENCE else PALETTE["warn"]
         self.style_val.configure(text=f"{style_name.title()} [{style_conf:.2f}]", text_color=style_color)
 
         # Scene breakdown (same 5% threshold as the CLI summary table;
         # wrapped HUD label shows top entries instead of truncating at 3).
         if diag.semantic_breakdown:
             top_classes = [f"{k.capitalize()[:4]}:{int(v*100)}%" for k, v in diag.semantic_breakdown.items() if v > 0.05]
-            self.scene_val.configure(text=", ".join(top_classes[:4]) if top_classes else "General", text_color="#cbd5e1")
+            self.scene_val.configure(text=", ".join(top_classes[:4]) if top_classes else "General", text_color=PALETTE["text_soft"])
         else:
-            self.scene_val.configure(text="General", text_color="#cbd5e1")
+            self.scene_val.configure(text="General", text_color=PALETTE["text_soft"])
 

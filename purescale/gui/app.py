@@ -9,6 +9,7 @@ from tkinter import filedialog, messagebox
 from typing import Dict, Optional
 
 import customtkinter as ctk
+from purescale.gui.theme import PALETTE, font
 import cv2
 import numpy as np
 from PIL import Image
@@ -46,7 +47,7 @@ class PureScaleApp(ctk.CTk):
         self.title("PureScale 4.0 - Autonomous Multiscale Vision & Edge AI")
         self.geometry("1480x940")
         self.minsize(1080, 720)
-        self.configure(fg_color="#090d16")
+        self.configure(fg_color=PALETTE["bg_app"])
 
         # Pipeline and state
         self.pipeline = PureScalePipeline()
@@ -76,7 +77,7 @@ class PureScaleApp(ctk.CTk):
     def _build_layout(self) -> None:
         """Constructs application UI hierarchy."""
         # 1. Top Header Bar
-        self.top_bar = ctk.CTkFrame(self, fg_color="#0d131f", height=50, corner_radius=0)
+        self.top_bar = ctk.CTkFrame(self, fg_color=PALETTE["bg_bar"], height=50, corner_radius=0)
         self.top_bar.pack(side="top", fill="x")
 
         title_box = ctk.CTkFrame(self.top_bar, fg_color="transparent")
@@ -85,22 +86,22 @@ class PureScaleApp(ctk.CTk):
         ctk.CTkLabel(
             title_box,
             text="PURESCALE 4.0",
-            font=ctk.CTkFont(family="Consolas", size=15, weight="bold"),
-            text_color="#f8fafc",
+            font=font("mono15b"),
+            text_color=PALETTE["text_title"],
         ).pack(side="left")
 
         ctk.CTkLabel(
             title_box,
             text=f"[{self.hardware_info}]",
-            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
-            text_color="#38bdf8",
+            font=font("mono11b"),
+            text_color=PALETTE["accent_bright"],
         ).pack(side="left", padx=12)
 
         self.res_badge = ctk.CTkLabel(
             title_box,
             text="No Image",
-            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
-            text_color="#64748b",
+            font=font("mono11b"),
+            text_color=PALETTE["text_faint"],
         )
         self.res_badge.pack(side="left", padx=8)
 
@@ -112,11 +113,11 @@ class PureScaleApp(ctk.CTk):
             view_box,
             values=["Enhanced", "Original", "Split View"],
             command=self._on_view_mode_change,
-            selected_color="#0284c7",
-            selected_hover_color="#0369a1",
-            unselected_color="#131b2e",
-            unselected_hover_color="#1e293b",
-            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
+            selected_color=PALETTE["accent"],
+            selected_hover_color=PALETTE["accent_hover"],
+            unselected_color=PALETTE["surface"],
+            unselected_hover_color=PALETTE["surface_hover"],
+            font=font("mono11b"),
         )
         self.view_mode_seg.set("Enhanced")
         self.view_mode_seg.pack(side="left", padx=10)
@@ -127,8 +128,8 @@ class PureScaleApp(ctk.CTk):
         self.split_label = ctk.CTkLabel(
             self.split_ctrl_frame,
             text="Split: 50%",
-            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
-            text_color="#38bdf8",
+            font=font("mono10b"),
+            text_color=PALETTE["accent_bright"],
         )
         self.split_label.pack(side="left", padx=(4, 6))
 
@@ -140,10 +141,10 @@ class PureScaleApp(ctk.CTk):
             width=120,
             height=14,
             command=self._on_split_slider_move,
-            fg_color="#1e293b",
-            progress_color="#0284c7",
-            button_color="#38bdf8",
-            button_hover_color="#7dd3fc",
+            fg_color=PALETTE["surface_hover"],
+            progress_color=PALETTE["accent"],
+            button_color=PALETTE["accent_bright"],
+            button_hover_color=PALETTE["accent_lightest"],
         )
         self.split_slider.set(0.5)
         self.split_slider.pack(side="left", padx=(0, 8))
@@ -152,17 +153,17 @@ class PureScaleApp(ctk.CTk):
         zoom_frame = ctk.CTkFrame(view_box, fg_color="transparent")
         zoom_frame.pack(side="left")
 
-        ctk.CTkButton(zoom_frame, text="-", width=28, height=28, command=lambda: self.canvas.zoom_step(0.85), fg_color="#131b2e", hover_color="#1e293b").pack(side="left", padx=2)
-        ctk.CTkButton(zoom_frame, text="+", width=28, height=28, command=lambda: self.canvas.zoom_step(1.15), fg_color="#131b2e", hover_color="#1e293b").pack(side="left", padx=2)
-        ctk.CTkButton(zoom_frame, text="100%", width=44, height=28, command=lambda: self.canvas.zoom_100(), fg_color="#131b2e", hover_color="#1e293b").pack(side="left", padx=2)
-        ctk.CTkButton(zoom_frame, text="Fit", width=36, height=28, command=lambda: self.canvas.fit_to_window(), fg_color="#131b2e", hover_color="#1e293b").pack(side="left", padx=2)
+        ctk.CTkButton(zoom_frame, text="-", width=28, height=28, command=lambda: self.canvas.zoom_step(0.85), fg_color=PALETTE["surface"], hover_color=PALETTE["surface_hover"]).pack(side="left", padx=2)
+        ctk.CTkButton(zoom_frame, text="+", width=28, height=28, command=lambda: self.canvas.zoom_step(1.15), fg_color=PALETTE["surface"], hover_color=PALETTE["surface_hover"]).pack(side="left", padx=2)
+        ctk.CTkButton(zoom_frame, text="100%", width=44, height=28, command=lambda: self.canvas.zoom_100(), fg_color=PALETTE["surface"], hover_color=PALETTE["surface_hover"]).pack(side="left", padx=2)
+        ctk.CTkButton(zoom_frame, text="Fit", width=36, height=28, command=lambda: self.canvas.fit_to_window(), fg_color=PALETTE["surface"], hover_color=PALETTE["surface_hover"]).pack(side="left", padx=2)
 
         self.zoom_pct_label = ctk.CTkLabel(
             zoom_frame,
             text="Fit (100%)",
             width=70,
-            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
-            text_color="#38bdf8",
+            font=font("mono10b"),
+            text_color=PALETTE["accent_bright"],
         )
         self.zoom_pct_label.pack(side="left", padx=(4, 0))
 
@@ -174,15 +175,15 @@ class PureScaleApp(ctk.CTk):
         self.sidebar = SmoothScrollableFrame(
             content_frame,
             width=390,
-            fg_color="#0d131f",
+            fg_color=PALETTE["bg_bar"],
             corner_radius=0,
-            scrollbar_button_color="#1e293b",
-            scrollbar_button_hover_color="#334155",
+            scrollbar_button_color=PALETTE["surface_hover"],
+            scrollbar_button_hover_color=PALETTE["hover_light"],
         )
         self.sidebar.pack(side="left", fill="y")
 
         # Main Viewport & Bottom Status
-        viewport_frame = ctk.CTkFrame(content_frame, fg_color="#090d16", corner_radius=0)
+        viewport_frame = ctk.CTkFrame(content_frame, fg_color=PALETTE["bg_app"], corner_radius=0)
         viewport_frame.pack(side="right", fill="both", expand=True)
 
         self.canvas = InteractiveCanvas(viewport_frame)
@@ -190,18 +191,18 @@ class PureScaleApp(ctk.CTk):
         self.canvas.on_zoom_change = self._on_zoom_change
         self.canvas.pack(fill="both", expand=True)
 
-        self.status_bar = ctk.CTkFrame(viewport_frame, height=32, fg_color="#0d131f", corner_radius=0)
+        self.status_bar = ctk.CTkFrame(viewport_frame, height=32, fg_color=PALETTE["bg_bar"], corner_radius=0)
         self.status_bar.pack(side="bottom", fill="x")
 
         self.status_label = ctk.CTkLabel(
             self.status_bar,
             text="Ready. Select an image to enhance.",
-            font=ctk.CTkFont(family="Consolas", size=11),
-            text_color="#94a3b8",
+            font=font("mono11"),
+            text_color=PALETTE["text_muted"],
         )
         self.status_label.pack(side="left", padx=16)
 
-        self.progress_bar = ctk.CTkProgressBar(self.status_bar, width=200, height=8, fg_color="#131b2e", progress_color="#38bdf8")
+        self.progress_bar = ctk.CTkProgressBar(self.status_bar, width=200, height=8, fg_color=PALETTE["surface"], progress_color=PALETTE["accent_bright"])
         self.progress_bar.set(0.0)
         self.progress_bar.pack(side="right", padx=16)
 
@@ -279,7 +280,7 @@ class PureScaleApp(ctk.CTk):
         if not hasattr(self, "res_badge"):
             return
         if self.current_orig_bgr is None:
-            self.res_badge.configure(text="No Image", text_color="#64748b")
+            self.res_badge.configure(text="No Image", text_color=PALETTE["text_faint"])
             return
         oh, ow = self.current_orig_bgr.shape[:2]
         if self.current_enh_bgr is not None:
@@ -287,10 +288,10 @@ class PureScaleApp(ctk.CTk):
             scale_fac = ew / max(1, ow)
             self.res_badge.configure(
                 text=f"{ow}x{oh} -> {ew}x{eh} ({scale_fac:.1f}x)",
-                text_color="#4ade80",
+                text_color=PALETTE["ok"],
             )
         else:
-            self.res_badge.configure(text=f"{ow}x{oh}", text_color="#38bdf8")
+            self.res_badge.configure(text=f"{ow}x{oh}", text_color=PALETTE["accent_bright"])
 
     def _on_sidebar_tab_change(self, tab_name: str) -> None:
         """Shows selected category frame or all frames, and scrolls to top."""
@@ -321,9 +322,9 @@ class PureScaleApp(ctk.CTk):
             btn_frame,
             text="Open Image",
             command=self._open_file_dialog,
-            fg_color="#1e293b",
-            hover_color="#334155",
-            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            fg_color=PALETTE["surface_hover"],
+            hover_color=PALETTE["hover_light"],
+            font=font("ui12b"),
             height=34,
         ).pack(fill="x", pady=2)
 
@@ -331,9 +332,9 @@ class PureScaleApp(ctk.CTk):
             btn_frame,
             text="Auto-Enhance (CV Engine)",
             command=self._on_auto_enhance_click,
-            fg_color="#059669",
-            hover_color="#047857",
-            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+            fg_color=PALETTE["go"],
+            hover_color=PALETTE["go_hover"],
+            font=font("ui13b"),
             height=36,
         )
         self.btn_auto.pack(fill="x", pady=3)
@@ -342,9 +343,9 @@ class PureScaleApp(ctk.CTk):
             btn_frame,
             text="Enhance Image",
             command=self._start_enhancement_async,
-            fg_color="#0284c7",
-            hover_color="#0369a1",
-            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+            fg_color=PALETTE["accent"],
+            hover_color=PALETTE["accent_hover"],
+            font=font("ui13b"),
             height=36,
         )
         self.btn_enhance.pack(fill="x", pady=3)
@@ -353,11 +354,11 @@ class PureScaleApp(ctk.CTk):
             btn_frame,
             text="Save Result",
             command=self._save_file_dialog,
-            fg_color="#131b2e",
-            border_color="#38bdf8",
+            fg_color=PALETTE["surface"],
+            border_color=PALETTE["accent_bright"],
             border_width=1,
-            hover_color="#1e293b",
-            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            hover_color=PALETTE["surface_hover"],
+            font=font("ui12b"),
             height=32,
         )
         self.btn_save.pack(fill="x", pady=2)
@@ -367,11 +368,11 @@ class PureScaleApp(ctk.CTk):
             self.sidebar,
             values=["Profiles", "Detail", "Clean", "Color", "Portrait", "All"],
             command=self._on_sidebar_tab_change,
-            selected_color="#0284c7",
-            selected_hover_color="#0369a1",
-            unselected_color="#131b2e",
-            unselected_hover_color="#1e293b",
-            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
+            selected_color=PALETTE["accent"],
+            selected_hover_color=PALETTE["accent_hover"],
+            unselected_color=PALETTE["surface"],
+            unselected_hover_color=PALETTE["surface_hover"],
+            font=font("mono10b"),
             height=28,
         )
         self.tab_seg.set("Profiles")
@@ -415,9 +416,9 @@ class PureScaleApp(ctk.CTk):
             self.mode_card,
             values=["PureDSP", "Neural AI", "Hybrid"],
             command=self._on_mode_change,
-            selected_color="#0284c7",
-            unselected_color="#090d16",
-            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
+            selected_color=PALETTE["accent"],
+            unselected_color=PALETTE["bg_app"],
+            font=font("mono10b"),
         )
         self.mode_seg.set("PureDSP")
         self.mode_seg.pack(fill="x", padx=8, pady=(4, 6))
@@ -428,16 +429,16 @@ class PureScaleApp(ctk.CTk):
         ctk.CTkLabel(
             style_box,
             text="Neural Style:",
-            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
-            text_color="#94a3b8",
+            font=font("mono10b"),
+            text_color=PALETTE["text_muted"],
         ).pack(side="left", padx=(0, 6))
 
         self.style_seg = ctk.CTkSegmentedButton(
             style_box,
             values=[s.title() for s in valid_sr_styles()],
-            selected_color="#0284c7",
-            unselected_color="#090d16",
-            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
+            selected_color=PALETTE["accent"],
+            unselected_color=PALETTE["bg_app"],
+            font=font("mono10b"),
             height=24,
         )
         self.style_seg.set("Photo")
@@ -448,8 +449,8 @@ class PureScaleApp(ctk.CTk):
             self.mode_card,
             text="Auto-detect content style",
             command=self._on_auto_style_toggle,
-            font=ctk.CTkFont(family="Segoe UI", size=11),
-            progress_color="#38bdf8",
+            font=font("ui11"),
+            progress_color=PALETTE["accent_bright"],
         )
         self.auto_style_switch.pack(anchor="w", padx=12, pady=(0, 8))
 
@@ -477,18 +478,18 @@ class PureScaleApp(ctk.CTk):
             preset_row,
             values=[name.title() for name in PRESETS],
             command=self._on_preset_change,
-            fg_color="#131b2e",
-            button_color="#0284c7",
-            button_hover_color="#0369a1",
-            text_color="#e2e8f0",
-            dropdown_fg_color="#131b2e",
-            dropdown_hover_color="#1e293b",
-            dropdown_text_color="#e2e8f0",
+            fg_color=PALETTE["surface"],
+            button_color=PALETTE["accent"],
+            button_hover_color=PALETTE["accent_hover"],
+            text_color=PALETTE["text"],
+            dropdown_fg_color=PALETTE["surface"],
+            dropdown_hover_color=PALETTE["surface_hover"],
+            dropdown_text_color=PALETTE["text"],
             corner_radius=6,
             height=32,
             anchor="center",
-            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
-            dropdown_font=ctk.CTkFont(family="Segoe UI", size=11),
+            font=font("mono11b"),
+            dropdown_font=font("ui11"),
         )
         self.preset_opt.set("Balanced")
         self.preset_opt.pack(side="left", fill="x", expand=True, padx=(0, 6))
@@ -499,10 +500,10 @@ class PureScaleApp(ctk.CTk):
             width=54,
             height=32,
             command=self._on_reset_click,
-            fg_color="#1e293b",
-            hover_color="#334155",
-            text_color="#94a3b8",
-            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
+            fg_color=PALETTE["surface_hover"],
+            hover_color=PALETTE["hover_light"],
+            text_color=PALETTE["text_muted"],
+            font=font("mono11b"),
         )
         self.btn_reset_params.pack(side="right")
         self.preset_seg = self.preset_opt
@@ -523,16 +524,16 @@ class PureScaleApp(ctk.CTk):
             ),
         )
         self.perf_card.pack(fill="x", padx=12, pady=4)
-        self.diagnostics_switch = ctk.CTkSwitch(self.perf_card, text="Signal Diagnostics (HUD + auto-tune input)", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
+        self.diagnostics_switch = ctk.CTkSwitch(self.perf_card, text="Signal Diagnostics (HUD + auto-tune input)", font=font("ui11"), progress_color=PALETTE["accent_bright"])
         self.diagnostics_switch.select()
         self.diagnostics_switch.pack(anchor="w", padx=12, pady=(4, 2))
-        self.semantic_switch = ctk.CTkSwitch(self.perf_card, text="Semantic Region Guidance", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
+        self.semantic_switch = ctk.CTkSwitch(self.perf_card, text="Semantic Region Guidance", font=font("ui11"), progress_color=PALETTE["accent_bright"])
         self.semantic_switch.select()
         self.semantic_switch.pack(anchor="w", padx=12, pady=(2, 2))
-        self.contrast_switch = ctk.CTkSwitch(self.perf_card, text="BIMEF Dynamic Range Fusion", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
+        self.contrast_switch = ctk.CTkSwitch(self.perf_card, text="BIMEF Dynamic Range Fusion", font=font("ui11"), progress_color=PALETTE["accent_bright"])
         self.contrast_switch.select()
         self.contrast_switch.pack(anchor="w", padx=12, pady=(2, 2))
-        self.fast_2x_switch = ctk.CTkSwitch(self.perf_card, text="2x Neural Fast Path", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
+        self.fast_2x_switch = ctk.CTkSwitch(self.perf_card, text="2x Neural Fast Path", font=font("ui11"), progress_color=PALETTE["accent_bright"])
         self.fast_2x_switch.pack(anchor="w", padx=12, pady=(2, 4))
 
         # Spatial Scaling Card
@@ -567,9 +568,9 @@ class PureScaleApp(ctk.CTk):
         self.fmt_seg = ctk.CTkSegmentedButton(
             self.fmt_card,
             values=["PNG", "JPEG", "WebP"],
-            selected_color="#0284c7",
-            unselected_color="#090d16",
-            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
+            selected_color=PALETTE["accent"],
+            unselected_color=PALETTE["bg_app"],
+            font=font("mono10b"),
         )
         self.fmt_seg.set("PNG")
         self.fmt_seg.pack(fill="x", padx=8, pady=(4, 8))
@@ -606,7 +607,7 @@ class PureScaleApp(ctk.CTk):
             ),
         )
         self.pyramid_card.pack(fill="x", padx=12, pady=4)
-        self.pyramid_switch = ctk.CTkSwitch(self.pyramid_card, text="Enable Multiscale Pyramid", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
+        self.pyramid_switch = ctk.CTkSwitch(self.pyramid_card, text="Enable Multiscale Pyramid", font=font("ui11"), progress_color=PALETTE["accent_bright"])
         self.pyramid_switch.select()
         self.pyramid_switch.pack(anchor="w", padx=12, pady=(4, 2))
         self.pyramid_detail_slider = LabeledSlider(self.pyramid_card, label="Micro-Texture Detail (L1)", from_=0.5, to=2.0, default_val=1.20, step=0.05, is_float=True)
@@ -649,7 +650,7 @@ class PureScaleApp(ctk.CTk):
             ),
         )
         self.swf_card.pack(fill="x", padx=12, pady=4)
-        self.denoise_switch = ctk.CTkSwitch(self.swf_card, text="Enable Side Window Filter", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
+        self.denoise_switch = ctk.CTkSwitch(self.swf_card, text="Enable Side Window Filter", font=font("ui11"), progress_color=PALETTE["accent_bright"])
         self.denoise_switch.select()
         self.denoise_switch.pack(anchor="w", padx=12, pady=(4, 2))
         self.denoise_slider = LabeledSlider(self.swf_card, label="Cleaning Power", from_=10, to=100, default_val=40, step=5, is_float=False)
@@ -667,7 +668,7 @@ class PureScaleApp(ctk.CTk):
             ),
         )
         self.dehaze_card.pack(fill="x", padx=12, pady=(4, 16))
-        self.dehaze_switch = ctk.CTkSwitch(self.dehaze_card, text="Enable Dark Channel Dehazing", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
+        self.dehaze_switch = ctk.CTkSwitch(self.dehaze_card, text="Enable Dark Channel Dehazing", font=font("ui11"), progress_color=PALETTE["accent_bright"])
         self.dehaze_switch.pack(anchor="w", padx=12, pady=(4, 2))
         self.dehaze_slider = LabeledSlider(self.dehaze_card, label="Dehazing Strength", from_=0.0, to=1.0, default_val=0.50, step=0.05, is_float=True)
         self.dehaze_slider.pack(fill="x", padx=8)
@@ -691,7 +692,7 @@ class PureScaleApp(ctk.CTk):
         self.contrast_slider.pack(fill="x", padx=8)
         self.bright_slider = LabeledSlider(self.bimef_card, label="Radiometric Exposure Offset", from_=-50, to=50, default_val=0, step=5, is_float=False)
         self.bright_slider.pack(fill="x", padx=8)
-        self.local_tone_switch = ctk.CTkSwitch(self.bimef_card, text="Local Tone & Highlight Recovery", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
+        self.local_tone_switch = ctk.CTkSwitch(self.bimef_card, text="Local Tone & Highlight Recovery", font=font("ui11"), progress_color=PALETTE["accent_bright"])
         self.local_tone_switch.pack(anchor="w", padx=12, pady=(4, 2))
         self.tone_strength_slider = LabeledSlider(self.bimef_card, label="Local Tone Strength", from_=0.0, to=1.0, default_val=0.50, step=0.05, is_float=True)
         self.tone_strength_slider.pack(fill="x", padx=8)
