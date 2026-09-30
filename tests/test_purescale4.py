@@ -1561,10 +1561,15 @@ class TestPureScale4Packaging(unittest.TestCase):
 
         self.assertEqual(len(PRESETS), 20)
         for name in PRESETS:
-            cfg = get_preset_config(name)
-            self.assertIsInstance(cfg, PipelineConfig)
-            self.assertGreaterEqual(cfg.scale, 1.0)
-            self.assertGreaterEqual(cfg.sharpen_strength, 0.0)
+            with self.subTest(preset=name):
+                cfg = get_preset_config(name)
+                self.assertIsInstance(cfg, PipelineConfig)
+                # get_preset_config uses setattr (bypasses __post_init__),
+                # so validate explicitly: every shipped preset must satisfy
+                # the documented ranges or CLI/GUI fail at use time.
+                cfg.validate()
+                self.assertGreaterEqual(cfg.scale, 1.0)
+                self.assertGreaterEqual(cfg.sharpen_strength, 0.0)
 
     def test_diagnostics_result_single_source(self):
         from purescale.config import DiagnosticsResult as FromConfig
