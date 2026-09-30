@@ -540,25 +540,29 @@ def classify_content_style(img_bgr: np.ndarray) -> Tuple[str, float]:
     "manga") from cheap proxy signals, deterministically.
 
     Signals (160px proxy): mean HSV saturation, quantized unique-color
-    fraction (5 bits/channel), 95%-coverage color concentration (fraction
-    of distinct colors covering 95% of pixels — robust to the JPEG noise
-    that defeats raw distinct counts on real files), high-pass
-    residual energy ratio (dot/line-scale structure vs broadband variance),
-    and extreme tonal occupancy (paper-white vs ink-black fraction).
+    fraction (5 bits/channel), 95%- and 80%-coverage color concentration
+    (fraction of distinct colors covering 95%/80% of pixels — robust to
+    the JPEG noise that defeats raw distinct counts on real files),
+    high-pass residual energy ratio (dot/line-scale structure vs broadband
+    variance), extreme tonal occupancy (paper-white/ink-black fraction),
+    and smooth-area fraction (5x5 local std < 5.0).
 
     Decision order (first match wins):
     - manga: near-zero saturation with few quantized colors, genuine
       structure, and extreme tonal occupancy > 0.50 (B&W ink line-art and
-      halftones; the extreme-tone gate rejects continuous-tone B&W photos
-      where midtones dominate), or dot-scale energy above 0.75 regardless of
-      color (color halftones). B&W photos fail the extreme-tone/energy gates;
-      noisy photos fail the dot-energy gate (resid ~0.48).
+      halftones; the occupancy gate rejects continuous-tone B&W photos
+      where midtones dominate), or dot-scale energy above 0.60
+      (B&W energetic) or above 0.75 with few colors regardless of
+      color (color halftones). Noisy photos fail the dot-energy gate
+      (resid ~0.48).
     - anime: very few distinct colors with genuine ink-edge energy (a
       0.20 residual floor rejects clean/blurred gradients, whose
       smoothness would otherwise mimic flat color) and real color, or
-      concentrated color usage (n95 < 0.20) with structure and color
-      (painterly illustration, whose gradients defeat raw color counts).
-    - photo: fallback for natural imagery and continuous-tone B&W photography.
+      concentrated color usage (n80 < 0.20 or n95 < 0.22) with structure,
+      color, and smooth-filled areas (painterly illustration, whose
+      gradients defeat raw color counts).
+    - photo: fast path for saturated, unconcentrated, textured content,
+      else fallback for natural imagery and continuous-tone B&W photography.
 
     Returns:
         Tuple of (style, confidence in [0.0, 1.0]).

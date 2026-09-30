@@ -298,12 +298,14 @@ defaults, so user intent always wins and photo behavior cannot regress.
 
 Content-aware routing (`--auto-style`, implied by `--auto`) classifies the
 input before the profile step from cheap 160px-proxy signals: mean HSV
-saturation, quantized unique-color fraction (5 bits/channel), 95%-coverage color
-concentration (fraction of distinct colors covering 95% of pixels —
-robust to the JPEG noise that defeats raw distinct counts on real
-files), high-pass residual energy ratio (dot/line-scale structure vs broadband variance),
-and extreme tonal occupancy $\text{extreme\_tones} = \frac{1}{N} \sum (\mathbb{I}[I_i > 215] + \mathbb{I}[I_i < 45])$
-measuring paper-white vs ink-black coverage.
+saturation, quantized unique-color fraction (5 bits/channel), 80%- and
+95%-coverage color concentration ($n_{80}$, $n_{95}$: fraction of distinct
+colors covering 80%/95% of pixels — robust to the JPEG noise that defeats
+raw distinct counts on real files), high-pass residual energy ratio
+(dot/line-scale structure vs broadband variance), extreme tonal occupancy
+$\text{extreme\_tones} = \frac{1}{N} \sum (\mathbb{I}[I_i > 215] + \mathbb{I}[I_i < 45])$
+measuring paper-white vs ink-black coverage, and smooth-area fraction
+(5x5 local std $< 5.0$).
 
 Near-zero saturation with few quantized colors, genuine structure, and extreme
 tonal occupancy $> 0.50$ routes to manga (B&W ink line-art and halftones; the extreme-tone
@@ -312,8 +314,10 @@ extreme tones remain $< 0.15$), as does dot-scale energy above 0.75 regardless o
 color (color halftones; noisy photos peak near 0.48 and stay photo);
 few distinct colors with genuine ink-edge energy — a 0.20 residual floor
 rejects clean/blurred gradients whose smoothness mimics flat color — and
-real color routes to anime, as does concentrated color usage ($n_{95} < 0.20$)
-with structure and color (painterly illustration and webtoons); everything else stays
+real color routes to anime, as does concentrated color usage
+($n_{80} < 0.20$ or $n_{95} < 0.22$) with structure, color, and smooth-filled
+areas (painterly illustration and webtoons); saturated, unconcentrated,
+textured content takes a photo fast path, and everything else stays
 photo. Calibrated against real-world test suites (illustrated ground
 truths, zero false positives on continuous-tone monochrome and color photography).
 Re-routing needs confidence $\ge 0.60$ and never overrides an explicit `--style`;
