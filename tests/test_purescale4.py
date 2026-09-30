@@ -1556,6 +1556,16 @@ class TestPureScale4Packaging(unittest.TestCase):
         with self.assertRaises(ValueError):
             get_preset_config("not-a-preset")
 
+    def test_all_twenty_presets_valid(self):
+        from purescale.config import PRESETS, get_preset_config, PipelineConfig
+
+        self.assertEqual(len(PRESETS), 20)
+        for name in PRESETS:
+            cfg = get_preset_config(name)
+            self.assertIsInstance(cfg, PipelineConfig)
+            self.assertGreaterEqual(cfg.scale, 1.0)
+            self.assertGreaterEqual(cfg.sharpen_strength, 0.0)
+
     def test_diagnostics_result_single_source(self):
         from purescale.config import DiagnosticsResult as FromConfig
         from purescale.dsp.diagnostics import DiagnosticsResult as FromDsp
