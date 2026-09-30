@@ -118,14 +118,7 @@ def process_file(pipeline: PureScalePipeline, cfg: PipelineConfig, in_path: str,
             "stage_latencies_ms": {k: round(v, 2) for k, v in res.stage_latencies.items()},
         }
         if res.diagnostics:
-            info["diagnostics"] = {
-                "noise_sigma": res.diagnostics.noise_sigma,
-                "noise_category": res.diagnostics.noise_category,
-                "blur_score": res.diagnostics.blur_score,
-                "blur_category": res.diagnostics.blur_category,
-                "haze_index": res.diagnostics.haze_index,
-                "haze_detected": res.diagnostics.haze_detected,
-            }
+            info["diagnostics"] = res.diagnostics.to_dict()
         if reference is not None:
             if reference.shape == res.image.shape:
                 info["quality"] = compare_images(reference, res.image)
@@ -342,23 +335,9 @@ def main(args: List[str] = None) -> int:
         bgr, _ = load_image_with_alpha(in_path)
         diag = diagnose_image(bgr)
         if parsed.json:
-            print(json.dumps({
-                "input": in_path,
-                "noise_sigma": diag.noise_sigma,
-                "noise_category": diag.noise_category,
-                "blur_score": diag.blur_score,
-                "blur_category": diag.blur_category,
-                "entropy": diag.entropy,
-                "dynamic_range": diag.dynamic_range,
-                "shadow_clipping": diag.shadow_clipping,
-                "highlight_clipping": diag.highlight_clipping,
-                "mean_luminance": diag.mean_luminance,
-                "color_cast_kelvin": diag.color_cast_kelvin,
-                "color_cast_name": diag.color_cast_name,
-                "haze_index": diag.haze_index,
-                "haze_detected": diag.haze_detected,
-                "semantic_breakdown": diag.semantic_breakdown,
-            }))
+            payload = {"input": in_path}
+            payload.update(diag.to_dict())
+            print(json.dumps(payload))
         else:
             print(diag.summary_table())
         return 0

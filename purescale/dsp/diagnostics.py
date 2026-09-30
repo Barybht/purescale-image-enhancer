@@ -92,6 +92,12 @@ class DiagnosticsResult:
         lines.append(border)
         return "\n".join(lines)
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Machine-readable telemetry (single source for CLI JSON output)."""
+        import dataclasses
+
+        return dataclasses.asdict(self)
+
 
 
 def estimate_wavelet_noise_mad(img_gray: np.ndarray) -> Tuple[float, str]:

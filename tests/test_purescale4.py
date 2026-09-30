@@ -628,6 +628,24 @@ class TestPureScale4CliAndGui(unittest.TestCase):
         code = main([self.temp_in, "--diagnostics"])
         self.assertEqual(code, 0)
 
+    def test_cli_diagnostics_json_parity(self):
+        # --diagnostics --json must expose every DiagnosticsResult field:
+        # to_dict() is the single source, so new fields can't go stale.
+        import io
+        from contextlib import redirect_stdout
+        from purescale.cli import main
+        from purescale.dsp.diagnostics import DiagnosticsResult
+        import dataclasses
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = main([self.temp_in, "--diagnostics", "--json"])
+        self.assertEqual(code, 0)
+        import json
+        payload = json.loads(buf.getvalue())
+        expected = {f.name for f in dataclasses.fields(DiagnosticsResult)} | {"input"}
+        self.assertEqual(set(payload.keys()), expected)
+
     def test_cli_auto_flag(self):
         from purescale.cli import main
         code = main([self.temp_in, "-o", self.temp_out, "--auto", "--scale", "1.0"])
