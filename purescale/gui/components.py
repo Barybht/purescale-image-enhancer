@@ -4,6 +4,7 @@ from typing import Callable, Optional
 import customtkinter as ctk
 from purescale.gui.theme import PALETTE, font
 from tkinter import messagebox
+import math
 
 from purescale.config import AUTO_STYLE_CONFIDENCE, DiagnosticsResult
 
@@ -82,6 +83,7 @@ class LabeledSlider(ctk.CTkFrame):
 
         self.command = command
         self.is_float = is_float
+        self.step = step if step and step > 0 else 1.0
 
         top_row = ctk.CTkFrame(self, fg_color="transparent")
         top_row.pack(fill="x", padx=4, pady=(2, 0))
@@ -96,7 +98,7 @@ class LabeledSlider(ctk.CTkFrame):
 
         self.val_label = ctk.CTkLabel(
             top_row,
-            text=f"{default_val:.2f}" if is_float else str(int(default_val)),
+            text=self._fmt(default_val),
             font=font("mono11b"),
             text_color=PALETTE["accent_bright"],
         )
@@ -120,11 +122,15 @@ class LabeledSlider(ctk.CTkFrame):
         self.slider.set(default_val)
         self.slider.pack(fill="x", padx=4, pady=(2, 6))
 
+    def _fmt(self, val: float) -> str:
+        """Formats readout to the slider's step precision (1.1 not 1.10)."""
+        if not self.is_float:
+            return str(int(round(val)))
+        decimals = max(0, -int(math.floor(math.log10(self.step) + 1e-9)))
+        return f"{val:.{decimals}f}"
+
     def _on_change(self, val: float) -> None:
-        if self.is_float:
-            self.val_label.configure(text=f"{val:.2f}")
-        else:
-            self.val_label.configure(text=str(int(round(val))))
+        self.val_label.configure(text=self._fmt(val))
         if self.command:
             self.command(val)
 
@@ -134,10 +140,7 @@ class LabeledSlider(ctk.CTkFrame):
 
     def set(self, val: float) -> None:
         self.slider.set(val)
-        if self.is_float:
-            self.val_label.configure(text=f"{val:.2f}")
-        else:
-            self.val_label.configure(text=str(int(round(val))))
+        self.val_label.configure(text=self._fmt(val))
 
     def set_enabled(self, enabled: bool) -> None:
         """Enables or disables the slider and dims text."""
