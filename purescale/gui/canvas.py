@@ -23,6 +23,7 @@ class InteractiveCanvas(tk.Canvas):
         self.split_pos: float = 0.5       # 0.0 to 1.0
         self.dragging_divider: bool = False
         self.on_split_change: Optional[Callable[[float], None]] = None
+        self.on_zoom_change: Optional[Callable[[float], None]] = None
 
         # Viewport transform
         self.zoom_level: float = 1.0
@@ -88,6 +89,7 @@ class InteractiveCanvas(tk.Canvas):
             if prev_enh is None and enh is not None and prev_orig is not None and enh.size[0] > 0:
                 scale_change = float(orig.size[0]) / float(enh.size[0])
                 self.zoom_level = max(0.01, self.zoom_level * scale_change)
+                self._notify_zoom_change()
             self.redraw()
 
     def set_view_mode(self, mode: str) -> None:
@@ -104,6 +106,14 @@ class InteractiveCanvas(tk.Canvas):
         if notify and self.on_split_change:
             self.on_split_change(self.split_pos)
         self.redraw()
+
+    def _notify_zoom_change(self) -> None:
+        """Notifies registered listener of zoom change."""
+        if self.on_zoom_change:
+            try:
+                self.on_zoom_change(self.zoom_level)
+            except Exception:
+                pass
 
     def fit_to_window(self) -> None:
         """Calculates optimal zoom factor to fit active image inside viewport."""
@@ -145,6 +155,7 @@ class InteractiveCanvas(tk.Canvas):
         self.pan_x = (cw - iw * self.zoom_level) / 2.0
         self.pan_y = (ch - ih * self.zoom_level) / 2.0
         self.is_fit_mode = True
+        self._notify_zoom_change()
         self.redraw()
 
     def zoom_step(self, factor: float) -> None:
@@ -164,6 +175,7 @@ class InteractiveCanvas(tk.Canvas):
         self.pan_x = cw - (cw - self.pan_x) * ratio
         self.pan_y = ch - (ch - self.pan_y) * ratio
         self._clamp_pan()
+        self._notify_zoom_change()
         self.redraw()
 
     def zoom_100(self) -> None:
@@ -176,6 +188,7 @@ class InteractiveCanvas(tk.Canvas):
         self.pan_x = cw - (cw - self.pan_x) * ratio
         self.pan_y = ch - (ch - self.pan_y) * ratio
         self._clamp_pan()
+        self._notify_zoom_change()
         self.redraw()
 
     def _on_resize(self, event) -> None:
@@ -292,6 +305,7 @@ class InteractiveCanvas(tk.Canvas):
         self.pan_x = cx - (cx - self.pan_x) * ratio
         self.pan_y = cy - (cy - self.pan_y) * ratio
         self._clamp_pan()
+        self._notify_zoom_change()
         self._request_redraw()
 
     @staticmethod

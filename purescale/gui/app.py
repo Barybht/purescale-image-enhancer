@@ -6,7 +6,7 @@ import threading
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox
-from typing import Optional
+from typing import Dict, Optional
 
 import customtkinter as ctk
 import cv2
@@ -61,10 +61,7 @@ class PureScaleApp(ctk.CTk):
 
         self._detect_hardware()
         self._build_layout()
-        # Keyboard shortcuts: Ctrl+O open, Ctrl+S save, Ctrl+E enhance.
-        self.bind("<Control-o>", lambda e: self._open_file_dialog())
-        self.bind("<Control-s>", lambda e: self._save_file_dialog())
-        self.bind("<Control-e>", lambda e: self._start_enhancement_async())
+        self._bind_shortcuts()
 
     def _detect_hardware(self) -> None:
         """Determines active hardware acceleration device name."""
@@ -98,7 +95,15 @@ class PureScaleApp(ctk.CTk):
             text_color="#38bdf8",
         ).pack(side="left", padx=12)
 
-        # View Mode Segmented Switcher
+        self.res_badge = ctk.CTkLabel(
+            title_box,
+            text="No Image",
+            font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
+            text_color="#64748b",
+        )
+        self.res_badge.pack(side="left", padx=8)
+
+        # View Mode Segmented Switcher & Zoom Controls
         view_box = ctk.CTkFrame(self.top_bar, fg_color="transparent")
         view_box.pack(side="right", padx=16)
 
@@ -151,14 +156,23 @@ class PureScaleApp(ctk.CTk):
         ctk.CTkButton(zoom_frame, text="100%", width=44, height=28, command=lambda: self.canvas.zoom_100(), fg_color="#131b2e", hover_color="#1e293b").pack(side="left", padx=2)
         ctk.CTkButton(zoom_frame, text="Fit", width=36, height=28, command=lambda: self.canvas.fit_to_window(), fg_color="#131b2e", hover_color="#1e293b").pack(side="left", padx=2)
 
+        self.zoom_pct_label = ctk.CTkLabel(
+            zoom_frame,
+            text="Fit (100%)",
+            width=70,
+            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
+            text_color="#38bdf8",
+        )
+        self.zoom_pct_label.pack(side="left", padx=(4, 0))
+
         # 2. Main Content Split (Sidebar + Viewport)
         content_frame = ctk.CTkFrame(self, fg_color="transparent")
         content_frame.pack(fill="both", expand=True)
 
-        # Left Scrollable Sidebar (kinetic smooth scrolling; same cards API)
+        # Left Scrollable Sidebar (kinetic smooth scrolling; categorized tabs)
         self.sidebar = SmoothScrollableFrame(
             content_frame,
-            width=380,
+            width=390,
             fg_color="#0d131f",
             corner_radius=0,
             scrollbar_button_color="#1e293b",
@@ -172,6 +186,7 @@ class PureScaleApp(ctk.CTk):
 
         self.canvas = InteractiveCanvas(viewport_frame)
         self.canvas.on_split_change = self._on_canvas_split_change
+        self.canvas.on_zoom_change = self._on_zoom_change
         self.canvas.pack(fill="both", expand=True)
 
         self.status_bar = ctk.CTkFrame(viewport_frame, height=32, fg_color="#0d131f", corner_radius=0)
@@ -191,9 +206,89 @@ class PureScaleApp(ctk.CTk):
 
         self._populate_sidebar()
 
+    def _bind_shortcuts(self) -> None:
+        """Binds studio keyboard shortcuts for rapid workflow."""
+        self.bind("<Control-o>", lambda e: self._open_file_dialog())
+        self.bind("<Control-O>", lambda e: self._open_file_dialog())
+        self.bind("<Control-s>", lambda e: self._save_file_dialog())
+        self.bind("<Control-S>", lambda e: self._save_file_dialog())
+        self.bind("<Control-e>", lambda e: self._start_enhancement_async())
+        self.bind("<Control-E>", lambda e: self._start_enhancement_async())
+        self.bind("<Control-a>", lambda e: self._on_auto_enhance_click())
+        self.bind("<Control-A>", lambda e: self._on_auto_enhance_click())
+        self.bind("<Control-r>", lambda e: self._on_reset_click())
+        self.bind("<Control-R>", lambda e: self._on_reset_click())
+
+        # Viewport controls
+        self.bind("<space>", lambda e: self._cycle_view_mode())
+        self.bind("<f>", lambda e: self.canvas.fit_to_window())
+        self.bind("<F>", lambda e: self.canvas.fit_to_window())
+        self.bind("<Key-1>", lambda e: self.canvas.zoom_100())
+        self.bind("<plus>", lambda e: self.canvas.zoom_step(1.15))
+        self.bind("<equal>", lambda e: self.canvas.zoom_step(1.15))
+        self.bind("<minus>", lambda e: self.canvas.zoom_step(0.85))
+        self.bind("<underscore>", lambda e: self.canvas.zoom_step(0.85))
+        self.bind("<r>", lambda e: self._on_reset_click())
+        self.bind("<R>", lambda e: self._on_reset_click())
+
+    def _cycle_view_mode(self) -> None:
+        """Cycles through view modes: Original -> Enhanced -> Split View -> Original."""
+        modes = ["Original", "Enhanced", "Split View"]
+        cur = self.view_mode_seg.get()
+        idx = modes.index(cur) if cur in modes else 0
+        nxt = modes[(idx + 1) % len(modes)]
+        self.view_mode_seg.set(nxt)
+        self._on_view_mode_change(nxt)
+
+    def _on_zoom_change(self, zoom_level: float) -> None:
+        """Updates zoom percentage readout in header toolbar."""
+        if hasattr(self, "zoom_pct_label"):
+            pct = int(round(zoom_level * 100))
+            if getattr(self.canvas, "is_fit_mode", False):
+                self.zoom_pct_label.configure(text=f"Fit ({pct}%)")
+            else:
+                self.zoom_pct_label.configure(text=f"{pct}%")
+
+    def _update_res_badge(self) -> None:
+        """Updates resolution status badge in top header."""
+        if not hasattr(self, "res_badge"):
+            return
+        if self.current_orig_bgr is None:
+            self.res_badge.configure(text="No Image", text_color="#64748b")
+            return
+        oh, ow = self.current_orig_bgr.shape[:2]
+        if self.current_enh_bgr is not None:
+            eh, ew = self.current_enh_bgr.shape[:2]
+            scale_fac = ew / max(1, ow)
+            self.res_badge.configure(
+                text=f"{ow}x{oh} -> {ew}x{eh} ({scale_fac:.1f}x)",
+                text_color="#4ade80",
+            )
+        else:
+            self.res_badge.configure(text=f"{ow}x{oh}", text_color="#38bdf8")
+
+    def _on_sidebar_tab_change(self, tab_name: str) -> None:
+        """Shows selected category frame or all frames, and scrolls to top."""
+        for frame in self._tab_frames.values():
+            frame.pack_forget()
+
+        if tab_name == "All":
+            for frame in self._tab_frames.values():
+                frame.pack(fill="x")
+        else:
+            active_frame = self._tab_frames.get(tab_name)
+            if active_frame:
+                active_frame.pack(fill="x")
+
+        self.update_idletasks()
+        try:
+            self.sidebar._parent_canvas.yview_moveto(0.0)
+        except (AttributeError, tk.TclError):
+            pass
+
     def _populate_sidebar(self) -> None:
-        """Fills sidebar with action buttons, diagnostics HUD, and parameter cards."""
-        # Primary Action Buttons
+        """Fills sidebar with action buttons, inspector tab switcher, and category cards."""
+        # Primary Action Buttons (pinned at the top)
         btn_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         btn_frame.pack(fill="x", padx=12, pady=(12, 6))
 
@@ -207,7 +302,6 @@ class PureScaleApp(ctk.CTk):
             height=34,
         ).pack(fill="x", pady=2)
 
-        # Autonomous Auto-Enhance Button
         self.btn_auto = ctk.CTkButton(
             btn_frame,
             text="Auto-Enhance (CV Engine)",
@@ -243,13 +337,44 @@ class PureScaleApp(ctk.CTk):
         )
         self.btn_save.pack(fill="x", pady=2)
 
+        # Categorized Inspector Tab Switcher
+        self.tab_seg = ctk.CTkSegmentedButton(
+            self.sidebar,
+            values=["Profiles", "Detail", "Clean", "Color", "Portrait", "All"],
+            command=self._on_sidebar_tab_change,
+            selected_color="#0284c7",
+            selected_hover_color="#0369a1",
+            unselected_color="#131b2e",
+            unselected_hover_color="#1e293b",
+            font=ctk.CTkFont(family="Consolas", size=10, weight="bold"),
+            height=28,
+        )
+        self.tab_seg.set("Profiles")
+        self.tab_seg.pack(fill="x", padx=12, pady=(4, 6))
+
+        # Category Container Frames
+        self.tab_frame_profiles = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        self.tab_frame_detail = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        self.tab_frame_clean = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        self.tab_frame_color = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        self.tab_frame_portrait = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+
+        self._tab_frames: Dict[str, ctk.CTkFrame] = {
+            "Profiles": self.tab_frame_profiles,
+            "Detail": self.tab_frame_detail,
+            "Clean": self.tab_frame_clean,
+            "Color": self.tab_frame_color,
+            "Portrait": self.tab_frame_portrait,
+        }
+
+        # --- CATEGORY 1: PROFILES ---
         # 0. Live Signal Diagnostics HUD Card
-        self.hud_card = DiagnosticsHUDCard(self.sidebar)
+        self.hud_card = DiagnosticsHUDCard(self.tab_frame_profiles)
         self.hud_card.pack(fill="x", padx=12, pady=4)
 
         # 1. Mode Selector Card
-        mode_card = ParameterCard(
-            self.sidebar,
+        self.mode_card = ParameterCard(
+            self.tab_frame_profiles,
             title="EXECUTION ENGINE",
             badge="MODE",
             help_text=(
@@ -259,10 +384,10 @@ class PureScaleApp(ctk.CTk):
                 "Hybrid: neural upscaling + DSP color, contrast and clarity."
             ),
         )
-        mode_card.pack(fill="x", padx=12, pady=4)
+        self.mode_card.pack(fill="x", padx=12, pady=4)
 
         self.mode_seg = ctk.CTkSegmentedButton(
-            mode_card,
+            self.mode_card,
             values=["PureDSP", "Neural AI", "Hybrid"],
             command=self._on_mode_change,
             selected_color="#0284c7",
@@ -272,7 +397,7 @@ class PureScaleApp(ctk.CTk):
         self.mode_seg.set("PureDSP")
         self.mode_seg.pack(fill="x", padx=8, pady=(4, 6))
 
-        style_box = ctk.CTkFrame(mode_card, fg_color="transparent")
+        style_box = ctk.CTkFrame(self.mode_card, fg_color="transparent")
         style_box.pack(fill="x", padx=8, pady=(0, 8))
 
         ctk.CTkLabel(
@@ -295,17 +420,17 @@ class PureScaleApp(ctk.CTk):
         self.style_seg.pack(side="left", fill="x", expand=True)
 
         self.auto_style_switch = ctk.CTkSwitch(
-            mode_card, text="Auto-detect content style",
+            self.mode_card,
+            text="Auto-detect content style",
             command=self._on_auto_style_toggle,
-            font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
+            font=ctk.CTkFont(family="Segoe UI", size=11),
+            progress_color="#38bdf8",
+        )
         self.auto_style_switch.pack(anchor="w", padx=12, pady=(0, 8))
 
-        # 2. Preset Profiles Card (OptionMenu wraps to any preset count;
-        # a 6-value SegmentedButton crowds a 380px sidebar and clips).
-        # Borderless card: the dropdown field itself carries the visual weight,
-        # so an extra 1px frame around it looks doubled and ugly.
-        preset_card = ParameterCard(
-            self.sidebar,
+        # 2. Preset Profiles Card
+        self.preset_card = ParameterCard(
+            self.tab_frame_profiles,
             title="OPTIMIZED PROFILES",
             badge="PRESETS",
             border_width=0,
@@ -318,9 +443,9 @@ class PureScaleApp(ctk.CTk):
                 "and targets anime-style neural weights."
             ),
         )
-        preset_card.pack(fill="x", padx=12, pady=4)
+        self.preset_card.pack(fill="x", padx=12, pady=4)
 
-        preset_row = ctk.CTkFrame(preset_card, fg_color="transparent")
+        preset_row = ctk.CTkFrame(self.preset_card, fg_color="transparent")
         preset_row.pack(fill="x", padx=8, pady=(4, 8))
 
         self.preset_opt = ctk.CTkOptionMenu(
@@ -355,13 +480,11 @@ class PureScaleApp(ctk.CTk):
             font=ctk.CTkFont(family="Consolas", size=11, weight="bold"),
         )
         self.btn_reset_params.pack(side="right")
-        # Backward-compat alias (older code/tests reference preset_seg).
         self.preset_seg = self.preset_opt
 
-        # 2b. Performance / Telemetry Card (CLI parity: --no-pyramid is the
-        # pyramid switch, --no-semantic/--diagnostics/--no-contrast below).
-        perf_card = ParameterCard(
-            self.sidebar,
+        # 2b. Performance & Telemetry Card
+        self.perf_card = ParameterCard(
+            self.tab_frame_profiles,
             title="PERFORMANCE & TELEMETRY",
             badge="FAST",
             help_text=(
@@ -374,83 +497,22 @@ class PureScaleApp(ctk.CTk):
                 "original exposure curve."
             ),
         )
-        perf_card.pack(fill="x", padx=12, pady=4)
-        self.diagnostics_switch = ctk.CTkSwitch(perf_card, text="Signal Diagnostics (HUD + auto-tune input)", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
+        self.perf_card.pack(fill="x", padx=12, pady=4)
+        self.diagnostics_switch = ctk.CTkSwitch(self.perf_card, text="Signal Diagnostics (HUD + auto-tune input)", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
         self.diagnostics_switch.select()
         self.diagnostics_switch.pack(anchor="w", padx=12, pady=(4, 2))
-        self.semantic_switch = ctk.CTkSwitch(perf_card, text="Semantic Region Guidance", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
+        self.semantic_switch = ctk.CTkSwitch(self.perf_card, text="Semantic Region Guidance", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
         self.semantic_switch.select()
         self.semantic_switch.pack(anchor="w", padx=12, pady=(2, 2))
-        self.contrast_switch = ctk.CTkSwitch(perf_card, text="BIMEF Dynamic Range Fusion", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
+        self.contrast_switch = ctk.CTkSwitch(self.perf_card, text="BIMEF Dynamic Range Fusion", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
         self.contrast_switch.select()
         self.contrast_switch.pack(anchor="w", padx=12, pady=(2, 2))
-        self.fast_2x_switch = ctk.CTkSwitch(perf_card, text="2x Neural Fast Path", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
+        self.fast_2x_switch = ctk.CTkSwitch(self.perf_card, text="2x Neural Fast Path", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
         self.fast_2x_switch.pack(anchor="w", padx=12, pady=(2, 4))
 
-        # 3. Multiscale Local Laplacian Pyramid Card
-        pyramid_card = ParameterCard(
-            self.sidebar,
-            title="MULTISCALE LAPLACIAN PYRAMID",
-            badge="OCTAVE",
-            help_text=(
-                "4-octave detail synthesis (L1 micro-texture, L2 contours, "
-                "G3 base illumination).\n\n"
-                "Micro-Texture Detail (0.5–2.0): fabric, foliage, pore gain.\n"
-                "Structural Contours (0.8–1.8): edge and shape volume gain.\n"
-                "Dynamic Range Compression (0.0–1.0): base illumination "
-                "squeeze for harsh light. Higher values can look flat."
-            ),
-        )
-        pyramid_card.pack(fill="x", padx=12, pady=4)
-        self.pyramid_switch = ctk.CTkSwitch(pyramid_card, text="Enable Multiscale Pyramid", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
-        self.pyramid_switch.select()
-        self.pyramid_switch.pack(anchor="w", padx=12, pady=(4, 2))
-        self.pyramid_detail_slider = LabeledSlider(pyramid_card, label="Micro-Texture Detail (L1)", from_=0.5, to=2.0, default_val=1.20, step=0.05, is_float=True)
-        self.pyramid_detail_slider.pack(fill="x", padx=8)
-        self.pyramid_struct_slider = LabeledSlider(pyramid_card, label="Structural Contours (L2)", from_=0.8, to=1.8, default_val=1.10, step=0.05, is_float=True)
-        self.pyramid_struct_slider.pack(fill="x", padx=8)
-        self.pyramid_dynrange_slider = LabeledSlider(pyramid_card, label="Dynamic Range Compression (G3)", from_=0.0, to=1.0, default_val=0.0, step=0.05, is_float=True)
-        self.pyramid_dynrange_slider.pack(fill="x", padx=8)
-
-        # 4. Atmospheric Dehazing Card
-        dehaze_card = ParameterCard(
-            self.sidebar,
-            title="ATMOSPHERIC DEHAZING",
-            badge="DCP",
-            help_text=(
-                "Dark Channel Prior fog/haze removal.\n\n"
-                "Strength 0.0–1.0: 0.3–0.6 suits light haze, 0.7+ dense fog. "
-                "Too high darkens skies and boosts noise. Off by default."
-            ),
-        )
-        dehaze_card.pack(fill="x", padx=12, pady=4)
-        self.dehaze_switch = ctk.CTkSwitch(dehaze_card, text="Enable Dark Channel Dehazing", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
-        self.dehaze_switch.pack(anchor="w", padx=12, pady=(4, 2))
-        self.dehaze_slider = LabeledSlider(dehaze_card, label="Dehazing Strength", from_=0.0, to=1.0, default_val=0.50, step=0.05, is_float=True)
-        self.dehaze_slider.pack(fill="x", padx=8)
-
-        # 5. Pre-Restoration Conditioning Card
-        restore_card = ParameterCard(
-            self.sidebar,
-            title="PRE-RESTORATION CONDITIONING",
-            badge="RESTORE",
-            help_text=(
-                "Cleanup before upscaling.\n\n"
-                "Subpixel Anti-Aliasing (0–100): dissolves pixel blocks and "
-                "JPEG seams. 20–50 subtle, 60+ for blocky avatars.\n"
-                "Shock Deblur (0–100): steepens soft lens/motion edges. "
-                "20–40 subtle, 50+ for out-of-focus shots. Both 0 = off."
-            ),
-        )
-        restore_card.pack(fill="x", padx=12, pady=4)
-        self.depixel_slider = LabeledSlider(restore_card, label="Subpixel Anti-Aliasing", from_=0, to=100, default_val=0, step=5, is_float=False)
-        self.depixel_slider.pack(fill="x", padx=8)
-        self.deblur_slider = LabeledSlider(restore_card, label="Structure Tensor Shock Deblur", from_=0, to=100, default_val=0, step=5, is_float=False)
-        self.deblur_slider.pack(fill="x", padx=8)
-
-        # 6. Spatial Scaling Card
-        scale_card = ParameterCard(
-            self.sidebar,
+        # Spatial Scaling Card
+        self.scale_card = ParameterCard(
+            self.tab_frame_profiles,
             title="SPATIAL SUPER-RESOLUTION",
             badge="SCALE",
             help_text=(
@@ -460,115 +522,13 @@ class PureScaleApp(ctk.CTk):
                 "and time; the OOM guard caps output at 40 MP."
             ),
         )
-        scale_card.pack(fill="x", padx=12, pady=4)
-        self.scale_slider = LabeledSlider(scale_card, label="Magnification Scale", from_=1.0, to=4.0, default_val=2.0, step=0.5, is_float=True)
+        self.scale_card.pack(fill="x", padx=12, pady=4)
+        self.scale_slider = LabeledSlider(self.scale_card, label="Magnification Scale", from_=1.0, to=4.0, default_val=2.0, step=0.5, is_float=True)
         self.scale_slider.pack(fill="x", padx=8)
 
-        # 7. Detail Clarity Card
-        cas_card = ParameterCard(
-            self.sidebar,
-            title="DETAIL CLARITY",
-            badge="CAS",
-            help_text=(
-                "Contrast-Adaptive Sharpening (halo-free).\n\n"
-                "0.0 off, 0.8–1.4 natural crispness, 2.0+ aggressive. "
-                "Gain is clamped by local contrast so strong edges never "
-                "grow halos; noisy shots prefer ≤1.0."
-            ),
-        )
-        cas_card.pack(fill="x", padx=12, pady=4)
-        self.cas_slider = LabeledSlider(cas_card, label="Contrast-Adaptive Sharpening", from_=0.0, to=3.0, default_val=1.1, step=0.1, is_float=True)
-        self.cas_slider.pack(fill="x", padx=8)
-
-        # 8. Structural Denoise Card
-        swf_card = ParameterCard(
-            self.sidebar,
-            title="STRUCTURAL DENOISE",
-            badge="SWF",
-            help_text=(
-                "Side Window Filter: edge-preserving denoise.\n\n"
-                "Cleaning Power 10–40 keeps film grain, 50–60 balances phone "
-                "noise, 70+ smooths heavily. Corners and text stay sharp. "
-                "Clean shots auto-skip it (diagnosed sigma < 2.0)."
-            ),
-        )
-        swf_card.pack(fill="x", padx=12, pady=4)
-        self.denoise_switch = ctk.CTkSwitch(swf_card, text="Enable Side Window Filter", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
-        self.denoise_switch.select()
-        self.denoise_switch.pack(anchor="w", padx=12, pady=(4, 2))
-        self.denoise_slider = LabeledSlider(swf_card, label="Cleaning Power", from_=10, to=100, default_val=40, step=5, is_float=False)
-        self.denoise_slider.pack(fill="x", padx=8)
-
-        # 9. Dynamic Range & Exposure Card
-        bimef_card = ParameterCard(
-            self.sidebar,
-            title="DYNAMIC RANGE & EXPOSURE",
-            badge="BIMEF",
-            help_text=(
-                "Tone and exposure.\n\n"
-                "HDR Boost 1.0–4.0: midtone recovery with pinned blacks "
-                "(~1.5 subtle, ~2.0 balanced, 3.0+ dramatic).\n"
-                "Exposure Offset −50…+50: linear brightness shift. Negative "
-                "protects highlights, positive lifts dark shots."
-            ),
-        )
-        bimef_card.pack(fill="x", padx=12, pady=4)
-        self.contrast_slider = LabeledSlider(bimef_card, label="HDR Dynamic Range Boost", from_=1.0, to=4.0, default_val=1.8, step=0.1, is_float=True)
-        self.contrast_slider.pack(fill="x", padx=8)
-        self.bright_slider = LabeledSlider(bimef_card, label="Radiometric Exposure Offset", from_=-50, to=50, default_val=0, step=5, is_float=False)
-        self.bright_slider.pack(fill="x", padx=8)
-        self.local_tone_switch = ctk.CTkSwitch(bimef_card, text="Local Tone & Highlight Recovery", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
-        self.local_tone_switch.pack(anchor="w", padx=12, pady=(4, 2))
-        self.tone_strength_slider = LabeledSlider(bimef_card, label="Local Tone Strength", from_=0.0, to=1.0, default_val=0.50, step=0.05, is_float=True)
-        self.tone_strength_slider.pack(fill="x", padx=8)
-        self.hl_recovery_slider = LabeledSlider(bimef_card, label="Highlight Recovery", from_=0.0, to=1.0, default_val=0.50, step=0.05, is_float=True)
-        self.hl_recovery_slider.pack(fill="x", padx=8)
-        self.shadow_boost_slider = LabeledSlider(bimef_card, label="Shadow Toe Boost", from_=0.0, to=1.0, default_val=0.50, step=0.05, is_float=True)
-        self.shadow_boost_slider.pack(fill="x", padx=8)
-
-        # 10. Perceptual Color & White Balance Card
-        color_card = ParameterCard(
-            self.sidebar,
-            title="PERCEPTUAL COLOR",
-            badge="OKLAB / CAT16",
-            help_text=(
-                "Color science.\n\n"
-                "Oklab Vibrance 1.0–1.5: saturation along straight hue lines "
-                "(1.05–1.15 natural, no blue-to-purple shift; shadows gated).\n"
-                "CAT16 Temperature −30…+30: white balance. Negative cools "
-                "yellow indoor light, positive warms daylight."
-            ),
-        )
-        color_card.pack(fill="x", padx=12, pady=4)
-        self.vibrance_slider = LabeledSlider(color_card, label="Oklab LMS Vibrance", from_=1.0, to=1.5, default_val=1.10, step=0.05, is_float=True)
-        self.vibrance_slider.pack(fill="x", padx=8)
-        self.temp_slider = LabeledSlider(color_card, label="CAT16 Color Temperature", from_=-30, to=30, default_val=0, step=5, is_float=False)
-        self.temp_slider.pack(fill="x", padx=8)
-        self.tint_slider = LabeledSlider(color_card, label="CAT16 Green/Magenta Tint", from_=-30, to=30, default_val=0, step=5, is_float=False)
-        self.tint_slider.pack(fill="x", padx=8)
-
-        # 11. Synchronized Portrait Retouching Card
-        portrait_card = ParameterCard(
-            self.sidebar,
-            title="PORTRAIT RETOUCHING",
-            badge="YUNET / FGF",
-            help_text=(
-                "Face retouching (YuNet detection + guided filter).\n\n"
-                "Skin Smoothing 0–100: blemish softening inside faces only "
-                "(20–40 natural, eyes excluded). 0 disables.\n"
-                "Eye Clarity 1.0–2.0: iris/catchlight pop (1.2–1.5 lifelike). "
-                "No faces detected = no change."
-            ),
-        )
-        portrait_card.pack(fill="x", padx=12, pady=4)
-        self.smooth_slider = LabeledSlider(portrait_card, label="Fast Guided Skin Smoothing", from_=0, to=100, default_val=35, step=5, is_float=False)
-        self.smooth_slider.pack(fill="x", padx=8)
-        self.eye_slider = LabeledSlider(portrait_card, label="Eye Catchlight Sharpness", from_=1.0, to=2.0, default_val=1.3, step=0.1, is_float=True)
-        self.eye_slider.pack(fill="x", padx=8)
-
-        # 12. Output Format Card
-        fmt_card = ParameterCard(
-            self.sidebar,
+        # Output Format Card
+        self.fmt_card = ParameterCard(
+            self.tab_frame_profiles,
             title="CONTAINER FORMAT",
             badge="EXPORT",
             help_text=(
@@ -578,9 +538,9 @@ class PureScaleApp(ctk.CTk):
                 "carry over when present."
             ),
         )
-        fmt_card.pack(fill="x", padx=12, pady=(4, 16))
+        self.fmt_card.pack(fill="x", padx=12, pady=(4, 16))
         self.fmt_seg = ctk.CTkSegmentedButton(
-            fmt_card,
+            self.fmt_card,
             values=["PNG", "JPEG", "WebP"],
             selected_color="#0284c7",
             unselected_color="#090d16",
@@ -588,6 +548,176 @@ class PureScaleApp(ctk.CTk):
         )
         self.fmt_seg.set("PNG")
         self.fmt_seg.pack(fill="x", padx=8, pady=(4, 8))
+
+        # --- CATEGORY 2: DETAIL ---
+        # Detail Clarity Card (CAS)
+        self.cas_card = ParameterCard(
+            self.tab_frame_detail,
+            title="DETAIL CLARITY",
+            badge="CAS",
+            help_text=(
+                "Contrast-Adaptive Sharpening (halo-free).\n\n"
+                "0.0 off, 0.8-1.4 natural crispness, 2.0+ aggressive. "
+                "Gain is clamped by local contrast so strong edges never "
+                "grow halos; noisy shots prefer <=1.0."
+            ),
+        )
+        self.cas_card.pack(fill="x", padx=12, pady=4)
+        self.cas_slider = LabeledSlider(self.cas_card, label="Contrast-Adaptive Sharpening", from_=0.0, to=3.0, default_val=1.1, step=0.1, is_float=True)
+        self.cas_slider.pack(fill="x", padx=8)
+
+        # Multiscale Local Laplacian Pyramid Card
+        self.pyramid_card = ParameterCard(
+            self.tab_frame_detail,
+            title="MULTISCALE LAPLACIAN PYRAMID",
+            badge="OCTAVE",
+            help_text=(
+                "4-octave detail synthesis (L1 micro-texture, L2 contours, "
+                "G3 base illumination).\n\n"
+                "Micro-Texture Detail (0.5-2.0): fabric, foliage, pore gain.\n"
+                "Structural Contours (0.8-1.8): edge and shape volume gain.\n"
+                "Dynamic Range Compression (0.0-1.0): base illumination "
+                "squeeze for harsh light. Higher values can look flat."
+            ),
+        )
+        self.pyramid_card.pack(fill="x", padx=12, pady=4)
+        self.pyramid_switch = ctk.CTkSwitch(self.pyramid_card, text="Enable Multiscale Pyramid", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
+        self.pyramid_switch.select()
+        self.pyramid_switch.pack(anchor="w", padx=12, pady=(4, 2))
+        self.pyramid_detail_slider = LabeledSlider(self.pyramid_card, label="Micro-Texture Detail (L1)", from_=0.5, to=2.0, default_val=1.20, step=0.05, is_float=True)
+        self.pyramid_detail_slider.pack(fill="x", padx=8)
+        self.pyramid_struct_slider = LabeledSlider(self.pyramid_card, label="Structural Contours (L2)", from_=0.8, to=1.8, default_val=1.10, step=0.05, is_float=True)
+        self.pyramid_struct_slider.pack(fill="x", padx=8)
+        self.pyramid_dynrange_slider = LabeledSlider(self.pyramid_card, label="Dynamic Range Compression (G3)", from_=0.0, to=1.0, default_val=0.0, step=0.05, is_float=True)
+        self.pyramid_dynrange_slider.pack(fill="x", padx=8)
+
+        # Pre-Restoration Conditioning Card
+        self.restore_card = ParameterCard(
+            self.tab_frame_detail,
+            title="PRE-RESTORATION CONDITIONING",
+            badge="RESTORE",
+            help_text=(
+                "Cleanup before upscaling.\n\n"
+                "Subpixel Anti-Aliasing (0-100): dissolves pixel blocks and "
+                "JPEG seams. 20-50 subtle, 60+ for blocky avatars.\n"
+                "Shock Deblur (0-100): steepens soft lens/motion edges. "
+                "20-40 subtle, 50+ for out-of-focus shots. Both 0 = off."
+            ),
+        )
+        self.restore_card.pack(fill="x", padx=12, pady=(4, 16))
+        self.depixel_slider = LabeledSlider(self.restore_card, label="Subpixel Anti-Aliasing", from_=0, to=100, default_val=0, step=5, is_float=False)
+        self.depixel_slider.pack(fill="x", padx=8)
+        self.deblur_slider = LabeledSlider(self.restore_card, label="Structure Tensor Shock Deblur", from_=0, to=100, default_val=0, step=5, is_float=False)
+        self.deblur_slider.pack(fill="x", padx=8)
+
+        # --- CATEGORY 3: CLEAN ---
+        # Structural Denoise Card (SWF)
+        self.swf_card = ParameterCard(
+            self.tab_frame_clean,
+            title="STRUCTURAL DENOISE",
+            badge="SWF",
+            help_text=(
+                "Side Window Filter: edge-preserving denoise.\n\n"
+                "Cleaning Power 10-40 keeps film grain, 50-60 balances phone "
+                "noise, 70+ smooths heavily. Corners and text stay sharp. "
+                "Clean shots auto-skip it (diagnosed sigma < 2.0)."
+            ),
+        )
+        self.swf_card.pack(fill="x", padx=12, pady=4)
+        self.denoise_switch = ctk.CTkSwitch(self.swf_card, text="Enable Side Window Filter", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
+        self.denoise_switch.select()
+        self.denoise_switch.pack(anchor="w", padx=12, pady=(4, 2))
+        self.denoise_slider = LabeledSlider(self.swf_card, label="Cleaning Power", from_=10, to=100, default_val=40, step=5, is_float=False)
+        self.denoise_slider.pack(fill="x", padx=8)
+
+        # Atmospheric Dehazing Card
+        self.dehaze_card = ParameterCard(
+            self.tab_frame_clean,
+            title="ATMOSPHERIC DEHAZING",
+            badge="DCP",
+            help_text=(
+                "Dark Channel Prior fog/haze removal.\n\n"
+                "Strength 0.0-1.0: 0.3-0.6 suits light haze, 0.7+ dense fog. "
+                "Too high darkens skies and boosts noise. Off by default."
+            ),
+        )
+        self.dehaze_card.pack(fill="x", padx=12, pady=(4, 16))
+        self.dehaze_switch = ctk.CTkSwitch(self.dehaze_card, text="Enable Dark Channel Dehazing", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
+        self.dehaze_switch.pack(anchor="w", padx=12, pady=(4, 2))
+        self.dehaze_slider = LabeledSlider(self.dehaze_card, label="Dehazing Strength", from_=0.0, to=1.0, default_val=0.50, step=0.05, is_float=True)
+        self.dehaze_slider.pack(fill="x", padx=8)
+
+        # --- CATEGORY 4: COLOR ---
+        # Dynamic Range & Exposure Card (BIMEF)
+        self.bimef_card = ParameterCard(
+            self.tab_frame_color,
+            title="DYNAMIC RANGE & EXPOSURE",
+            badge="BIMEF",
+            help_text=(
+                "Tone and exposure.\n\n"
+                "HDR Boost 1.0-4.0: midtone recovery with pinned blacks "
+                "(~1.5 subtle, ~2.0 balanced, 3.0+ dramatic).\n"
+                "Exposure Offset -50...+50: linear brightness shift. Negative "
+                "protects highlights, positive lifts dark shots."
+            ),
+        )
+        self.bimef_card.pack(fill="x", padx=12, pady=4)
+        self.contrast_slider = LabeledSlider(self.bimef_card, label="HDR Dynamic Range Boost", from_=1.0, to=4.0, default_val=1.8, step=0.1, is_float=True)
+        self.contrast_slider.pack(fill="x", padx=8)
+        self.bright_slider = LabeledSlider(self.bimef_card, label="Radiometric Exposure Offset", from_=-50, to=50, default_val=0, step=5, is_float=False)
+        self.bright_slider.pack(fill="x", padx=8)
+        self.local_tone_switch = ctk.CTkSwitch(self.bimef_card, text="Local Tone & Highlight Recovery", font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
+        self.local_tone_switch.pack(anchor="w", padx=12, pady=(4, 2))
+        self.tone_strength_slider = LabeledSlider(self.bimef_card, label="Local Tone Strength", from_=0.0, to=1.0, default_val=0.50, step=0.05, is_float=True)
+        self.tone_strength_slider.pack(fill="x", padx=8)
+        self.hl_recovery_slider = LabeledSlider(self.bimef_card, label="Highlight Recovery", from_=0.0, to=1.0, default_val=0.50, step=0.05, is_float=True)
+        self.hl_recovery_slider.pack(fill="x", padx=8)
+        self.shadow_boost_slider = LabeledSlider(self.bimef_card, label="Shadow Toe Boost", from_=0.0, to=1.0, default_val=0.50, step=0.05, is_float=True)
+        self.shadow_boost_slider.pack(fill="x", padx=8)
+
+        # Perceptual Color & White Balance Card
+        self.color_card = ParameterCard(
+            self.tab_frame_color,
+            title="PERCEPTUAL COLOR",
+            badge="OKLAB / CAT16",
+            help_text=(
+                "Color science.\n\n"
+                "Oklab Vibrance 1.0-1.5: saturation along straight hue lines "
+                "(1.05-1.15 natural, no blue-to-purple shift; shadows gated).\n"
+                "CAT16 Temperature -30...+30: white balance. Negative cools "
+                "yellow indoor light, positive warms daylight."
+            ),
+        )
+        self.color_card.pack(fill="x", padx=12, pady=(4, 16))
+        self.vibrance_slider = LabeledSlider(self.color_card, label="Oklab LMS Vibrance", from_=1.0, to=1.5, default_val=1.10, step=0.05, is_float=True)
+        self.vibrance_slider.pack(fill="x", padx=8)
+        self.temp_slider = LabeledSlider(self.color_card, label="CAT16 Color Temperature", from_=-30, to=30, default_val=0, step=5, is_float=False)
+        self.temp_slider.pack(fill="x", padx=8)
+        self.tint_slider = LabeledSlider(self.color_card, label="CAT16 Green/Magenta Tint", from_=-30, to=30, default_val=0, step=5, is_float=False)
+        self.tint_slider.pack(fill="x", padx=8)
+
+        # --- CATEGORY 5: PORTRAIT ---
+        # Synchronized Portrait Retouching Card
+        self.portrait_card = ParameterCard(
+            self.tab_frame_portrait,
+            title="PORTRAIT RETOUCHING",
+            badge="YUNET / FGF",
+            help_text=(
+                "Face retouching (YuNet detection + guided filter).\n\n"
+                "Skin Smoothing 0-100: blemish softening inside faces only "
+                "(20-40 natural, eyes excluded). 0 disables.\n"
+                "Eye Clarity 1.0-2.0: iris/catchlight pop (1.2-1.5 lifelike). "
+                "No faces detected = no change."
+            ),
+        )
+        self.portrait_card.pack(fill="x", padx=12, pady=(4, 16))
+        self.smooth_slider = LabeledSlider(self.portrait_card, label="Fast Guided Skin Smoothing", from_=0, to=100, default_val=35, step=5, is_float=False)
+        self.smooth_slider.pack(fill="x", padx=8)
+        self.eye_slider = LabeledSlider(self.portrait_card, label="Eye Catchlight Sharpness", from_=1.0, to=2.0, default_val=1.3, step=0.1, is_float=True)
+        self.eye_slider.pack(fill="x", padx=8)
+
+        # Show initial tab
+        self._on_sidebar_tab_change("Profiles")
 
     def _on_mode_change(self, mode_str: str) -> None:
         """Handles execution engine mode change, enabling/disabling widgets appropriately."""
@@ -737,6 +867,7 @@ class PureScaleApp(ctk.CTk):
         self._on_preset_change("Balanced")
         if self.auto_style_switch.get() and self.current_diagnostics:
             self._sync_routed_style(self.current_diagnostics)
+        self._update_res_badge()
 
     def _open_file_dialog(self) -> None:
         """Prompts user to select image file and loads it."""
@@ -781,6 +912,7 @@ class PureScaleApp(ctk.CTk):
             h, w = bgr.shape[:2]
             self.status_label.configure(text=f"Loaded: {os.path.basename(path)} ({w}x{h})")
             self.progress_bar.set(0.0)
+            self._update_res_badge()
 
             # Analyze image signal immediately (will auto-select style if auto_style_switch is on)
             self._run_quick_diagnostics_async(bgr)
@@ -996,6 +1128,7 @@ class PureScaleApp(ctk.CTk):
             self._on_view_mode_change("Enhanced")
 
         h, w = res.image.shape[:2]
+        self._update_res_badge()
         faces_str = f" | {res.faces_detected} faces" if res.faces_detected > 0 else ""
         style_str = ""
         if res.diagnostics:
@@ -1012,7 +1145,7 @@ class PureScaleApp(ctk.CTk):
             oh, ow = self.current_orig_bgr.shape[:2]
         else:
             ow, oh = w, h
-        detail = f"Finished in {res.latency_ms:.1f} ms ({res.backend_name}).\nResolution: {ow}x{oh} → {w}x{h}."
+        detail = f"Finished in {res.latency_ms:.1f} ms ({res.backend_name}).\nResolution: {ow}x{oh} -> {w}x{h}."
         if res.faces_detected > 0:
             detail += f"\nFaces retouched: {res.faces_detected}."
         messagebox.showinfo("Enhancement Complete", detail)
