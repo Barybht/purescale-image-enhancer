@@ -30,6 +30,7 @@ class InteractiveCanvas(tk.Canvas):
         self.pan_y: float = 0.0
         self.drag_start_x: float = 0.0
         self.drag_start_y: float = 0.0
+        self.is_fit_mode: bool = True
 
         self._tk_img: Optional[ImageTk.PhotoImage] = None
         self._redraw_after: Optional[str] = None
@@ -46,20 +47,56 @@ class InteractiveCanvas(tk.Canvas):
         self.bind("<Button-5>", lambda e: self._zoom_at(e.x, e.y, 0.85))
         self.bind("<Double-Button-1>", lambda e: self.fit_to_window())
 
-    def set_images(self, orig: Optional[Image.Image], enh: Optional[Image.Image]) -> None:
-        """Sets active images and resets viewport if new source."""
-        is_new = self.orig_pil is None and orig is not None
+    def _active_ref_image(self) -> Optional[Image.Image]:
+        """Returns the PIL image that defines the active display geometry."""
+        if self.view_mode == "original":
+            return self.orig_pil
+        return self.enh_pil or self.orig_pil
+
+    def set_images(
+        self,
+        orig: Optional[Image.Image],
+        enh: Optional[Image.Image],
+        force_fit: Optional[bool] = None,
+    ) -> None:
+        """Sets active images and updates viewport to fit if requested or in fit mode."""
+        prev_orig = self.orig_pil
+        prev_enh = self.enh_pil
+
         self.orig_pil = orig
         self.enh_pil = enh
-        if is_new:
+
+        # A brand new source image is being loaded if orig is provided and either:
+        # - there was no previous image
+        # - orig is a different image instance or has different dimensions
+        # - enh is None (loading a fresh un-enhanced original)
+        is_new_source = (
+            orig is not None
+            and (
+                prev_orig is None
+                or orig is not prev_orig
+                or orig.size != prev_orig.size
+                or enh is None
+            )
+        )
+
+        if force_fit is True or is_new_source or self.is_fit_mode:
+            self.is_fit_mode = True
             self.fit_to_window()
         else:
+            # If not in fit mode, keep visual alignment when resolution changes
+            if prev_enh is None and enh is not None and prev_orig is not None and enh.size[0] > 0:
+                scale_change = float(orig.size[0]) / float(enh.size[0])
+                self.zoom_level = max(0.01, self.zoom_level * scale_change)
             self.redraw()
 
     def set_view_mode(self, mode: str) -> None:
         """Updates display mode: 'enhanced', 'original', or 'split'."""
         self.view_mode = mode.lower()
-        self.redraw()
+        if self.is_fit_mode:
+            self.fit_to_window()
+        else:
+            self.redraw()
 
     def set_split_pos(self, pos: float, notify: bool = True) -> None:
         """Sets divider position (0.0 to 1.0) and redraws."""
@@ -70,39 +107,57 @@ class InteractiveCanvas(tk.Canvas):
 
     def fit_to_window(self) -> None:
         """Calculates optimal zoom factor to fit active image inside viewport."""
-        ref = self.enh_pil or self.orig_pil
+        ref = self._active_ref_image()
         if ref is None:
             return
 
+        try:
+            self.update_idletasks()
+        except (RuntimeError, tk.TclError):
+            pass
+
         cw = self.winfo_width()
         ch = self.winfo_height()
-        if cw <= 1 or ch <= 1:
+        if cw <= 10 or ch <= 10:
+            try:
+                cfg_w = int(self.cget("width"))
+                cfg_h = int(self.cget("height"))
+                if cfg_w > 10 and cfg_h > 10:
+                    cw, ch = cfg_w, cfg_h
+            except (ValueError, TypeError, tk.TclError):
+                pass
+
+        if cw <= 10 or ch <= 10:
             # Widget not laid out yet (e.g. right after set_images in __init__);
             # retry once geometry is available instead of zooming to ~0.
-            self.after(50, self.fit_to_window)
+            try:
+                self.after(50, self.fit_to_window)
+            except (RuntimeError, tk.TclError):
+                pass
             return
-        cw = max(10, cw)
-        ch = max(10, ch)
-        iw, ih = ref.size
 
-        scale_w = (cw - 40) / float(iw)
-        scale_h = (ch - 40) / float(ih)
-        self.zoom_level = max(0.05, min(scale_w, scale_h))
+        iw, ih = ref.size
+        pad = 40
+        scale_w = max(10, cw - pad) / float(iw)
+        scale_h = max(10, ch - pad) / float(ih)
+        self.zoom_level = max(0.01, min(scale_w, scale_h))
 
         self.pan_x = (cw - iw * self.zoom_level) / 2.0
         self.pan_y = (ch - ih * self.zoom_level) / 2.0
+        self.is_fit_mode = True
         self.redraw()
 
     def zoom_step(self, factor: float) -> None:
         """Zooms centered on viewport."""
-        ref = self.enh_pil or self.orig_pil
+        self.is_fit_mode = False
+        ref = self._active_ref_image()
         if ref is None:
             return
 
         cw = self.winfo_width() / 2.0
         ch = self.winfo_height() / 2.0
 
-        new_zoom = max(0.05, min(15.0, self.zoom_level * factor))
+        new_zoom = max(0.01, min(20.0, self.zoom_level * factor))
         ratio = new_zoom / self.zoom_level
         self.zoom_level = new_zoom
 
@@ -113,6 +168,7 @@ class InteractiveCanvas(tk.Canvas):
 
     def zoom_100(self) -> None:
         """Sets zoom to exactly 1.0 (100% native pixels)."""
+        self.is_fit_mode = False
         cw = self.winfo_width() / 2.0
         ch = self.winfo_height() / 2.0
         ratio = 1.0 / self.zoom_level
@@ -123,15 +179,22 @@ class InteractiveCanvas(tk.Canvas):
         self.redraw()
 
     def _on_resize(self, event) -> None:
-        self._request_redraw()
+        if self.is_fit_mode and self._active_ref_image() is not None:
+            self.fit_to_window()
+        else:
+            self._request_redraw()
 
     def _get_divider_screen_x(self) -> Optional[int]:
         """Returns the current screen X coordinate of the split divider, if visible."""
         if self.view_mode != "split" or self.orig_pil is None or self.enh_pil is None:
             return None
-        disp_w = max(1, int(round((self.enh_pil or self.orig_pil).size[0] * self.zoom_level)))
+        ref = self._active_ref_image()
+        if ref is None:
+            return None
+        disp_w = max(1, int(round(ref.size[0] * self.zoom_level)))
         x1 = int(round(self.pan_x))
         return x1 + int(round(disp_w * self.split_pos))
+
 
     def _on_mouse_move(self, event) -> None:
         """Changes cursor to resize cursor when hovering near the split divider."""
@@ -153,7 +216,7 @@ class InteractiveCanvas(tk.Canvas):
 
     def _on_drag_motion(self, event) -> None:
         if self.dragging_divider:
-            ref = self.enh_pil or self.orig_pil
+            ref = self._active_ref_image()
             if ref:
                 disp_w = max(1, int(round(ref.size[0] * self.zoom_level)))
                 x1 = int(round(self.pan_x))
@@ -166,6 +229,8 @@ class InteractiveCanvas(tk.Canvas):
 
         dx = event.x - self.drag_start_x
         dy = event.y - self.drag_start_y
+        if abs(dx) > 1 or abs(dy) > 1:
+            self.is_fit_mode = False
         self.drag_start_x = event.x
         self.drag_start_y = event.y
         self.pan_x += dx
@@ -194,7 +259,7 @@ class InteractiveCanvas(tk.Canvas):
 
     def _clamp_pan(self) -> None:
         """Keeps at least a margin of the image visible so it can't get lost."""
-        ref = self.enh_pil or self.orig_pil
+        ref = self._active_ref_image()
         if ref is None:
             return
         try:
@@ -216,10 +281,11 @@ class InteractiveCanvas(tk.Canvas):
         self._zoom_at(event.x, event.y, factor)
 
     def _zoom_at(self, cx: float, cy: float, factor: float) -> None:
-        ref = self.enh_pil or self.orig_pil
+        self.is_fit_mode = False
+        ref = self._active_ref_image()
         if ref is None:
             return
-        new_zoom = max(0.05, min(15.0, self.zoom_level * factor))
+        new_zoom = max(0.01, min(20.0, self.zoom_level * factor))
         ratio = new_zoom / self.zoom_level
         self.zoom_level = new_zoom
 
@@ -241,9 +307,7 @@ class InteractiveCanvas(tk.Canvas):
     def redraw(self) -> None:
         """Composites and renders active view mode."""
         self.delete("all")
-        ref = self.enh_pil if self.view_mode != "original" else self.orig_pil
-        if ref is None:
-            ref = self.orig_pil
+        ref = self._active_ref_image()
         if ref is None:
             cw = self.winfo_width() / 2
             ch = self.winfo_height() / 2
@@ -274,10 +338,11 @@ class InteractiveCanvas(tk.Canvas):
 
         # View Mode: Single Image
         if self.view_mode != "split" or self.orig_pil is None or self.enh_pil is None:
-            active_pil = self.orig_pil if self.view_mode == "original" else (self.enh_pil or self.orig_pil)
-            resized = active_pil.resize((disp_w, disp_h), resample)
-            self._tk_img = ImageTk.PhotoImage(resized)
-            self.create_image(x1, y1, anchor=tk.NW, image=self._tk_img)
+            active_pil = self._active_ref_image()
+            if active_pil is not None:
+                resized = active_pil.resize((disp_w, disp_h), resample)
+                self._tk_img = ImageTk.PhotoImage(resized)
+                self.create_image(x1, y1, anchor=tk.NW, image=self._tk_img)
             return
 
         # View Mode: Split Comparison

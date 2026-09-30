@@ -872,6 +872,130 @@ class TestPureScale4GuiScrolling(unittest.TestCase):
                 raise e
 
 
+class TestPureScale4GuiCanvas(unittest.TestCase):
+    """Tests InteractiveCanvas viewport fit mode, multi-image transitions, and enhancement scaling."""
+
+    def setUp(self):
+        if not _TK_AVAILABLE:
+            self.skipTest("tkinter not available on this runner")
+        try:
+            self.root = tk.Tk()
+            self.root.geometry("800x600")
+            self.root.withdraw()
+        except Exception as e:
+            if _is_display_error(e):
+                self.skipTest(f"Headless display not available: {e}")
+            else:
+                raise e
+
+    def tearDown(self):
+        if hasattr(self, "root") and self.root:
+            try:
+                self.root.destroy()
+            except Exception:
+                pass
+
+    def test_canvas_initial_fit_and_subsequent_image_fit(self):
+        from PIL import Image
+        from purescale.gui.canvas import InteractiveCanvas
+
+        canvas = InteractiveCanvas(self.root, width=800, height=600)
+        canvas.pack(fill="both", expand=True)
+        self.root.update_idletasks()
+
+        # Image 1 (1000x500)
+        img1 = Image.new("RGB", (1000, 500), color=(100, 100, 100))
+        canvas.set_images(img1, None)
+
+        self.assertTrue(canvas.is_fit_mode)
+        expected_zoom1 = (800 - 40) / 1000.0
+        self.assertAlmostEqual(canvas.zoom_level, expected_zoom1, delta=0.05)
+
+        # Image 2 (400x300, subsequent image load)
+        img2 = Image.new("RGB", (400, 300), color=(50, 50, 50))
+        canvas.set_images(img2, None)
+
+        # Must automatically re-fit to img2 dimensions and stay in fit mode
+        self.assertTrue(canvas.is_fit_mode)
+        expected_zoom2 = min((800 - 40) / 400.0, (600 - 40) / 300.0)
+        self.assertAlmostEqual(canvas.zoom_level, expected_zoom2, delta=0.05)
+
+    def test_canvas_enhancement_stays_in_fit_mode(self):
+        from PIL import Image
+        from purescale.gui.canvas import InteractiveCanvas
+
+        canvas = InteractiveCanvas(self.root, width=800, height=600)
+        canvas.pack(fill="both", expand=True)
+        self.root.update_idletasks()
+
+        # Load initial original image
+        orig = Image.new("RGB", (1000, 800), color=(80, 80, 80))
+        canvas.set_images(orig, None)
+        self.assertTrue(canvas.is_fit_mode)
+        orig_disp_w = orig.size[0] * canvas.zoom_level
+
+        # Now 4x enhanced image arrives
+        enh = Image.new("RGB", (4000, 3200), color=(120, 120, 120))
+        canvas.set_images(orig, enh)
+
+        # Remains in fit mode and adjusts zoom so on-screen size does not explode
+        self.assertTrue(canvas.is_fit_mode)
+        enh_disp_w = enh.size[0] * canvas.zoom_level
+        self.assertAlmostEqual(enh_disp_w, orig_disp_w, delta=5.0)
+
+    def test_canvas_manual_zoom_exits_fit_mode_and_preserves_scale_on_enhance(self):
+        from PIL import Image
+        from purescale.gui.canvas import InteractiveCanvas
+
+        canvas = InteractiveCanvas(self.root, width=800, height=600)
+        canvas.pack(fill="both", expand=True)
+        self.root.update_idletasks()
+
+        orig = Image.new("RGB", (1000, 800), color=(80, 80, 80))
+        canvas.set_images(orig, None)
+
+        # User zooms in manually
+        canvas.zoom_step(1.5)
+        self.assertFalse(canvas.is_fit_mode)
+
+        canvas.zoom_level = 2.0
+        disp_w_before = orig.size[0] * canvas.zoom_level
+
+        # Enhanced image arrives while user is zoomed in
+        enh = Image.new("RGB", (4000, 3200), color=(120, 120, 120))
+        canvas.set_images(orig, enh)
+
+        self.assertFalse(canvas.is_fit_mode)
+        # Zoom adjusted for 4x resolution: 2.0 * (1000/4000) = 0.5
+        self.assertAlmostEqual(canvas.zoom_level, 0.5, delta=0.01)
+        disp_w_after = enh.size[0] * canvas.zoom_level
+        self.assertAlmostEqual(disp_w_after, disp_w_before, delta=1.0)
+
+    def test_canvas_resize_refits_when_in_fit_mode(self):
+        from PIL import Image
+        from purescale.gui.canvas import InteractiveCanvas
+
+        canvas = InteractiveCanvas(self.root, width=800, height=600)
+        canvas.pack(fill="both", expand=True)
+        self.root.update_idletasks()
+
+        orig = Image.new("RGB", (1000, 800), color=(80, 80, 80))
+        canvas.set_images(orig, None)
+        self.assertTrue(canvas.is_fit_mode)
+
+        # In fit mode, _on_resize triggers fit_to_window
+        canvas._on_resize(None)
+        self.assertTrue(canvas.is_fit_mode)
+
+        # When not in fit mode, _on_resize does not force fit
+        canvas.zoom_step(1.5)
+        self.assertFalse(canvas.is_fit_mode)
+        saved_zoom = canvas.zoom_level
+        canvas._on_resize(None)
+        self.assertFalse(canvas.is_fit_mode)
+        self.assertAlmostEqual(canvas.zoom_level, saved_zoom, delta=0.001)
+
+
 class TestPureScale4MemoryGuard(unittest.TestCase):
     """Tests 8K OOM guard against runaway spatial memory allocations."""
 
