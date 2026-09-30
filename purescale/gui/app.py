@@ -296,6 +296,7 @@ class PureScaleApp(ctk.CTk):
 
         self.auto_style_switch = ctk.CTkSwitch(
             mode_card, text="Auto-detect content style",
+            command=self._on_auto_style_toggle,
             font=ctk.CTkFont(family="Segoe UI", size=11), progress_color="#38bdf8")
         self.auto_style_switch.pack(anchor="w", padx=12, pady=(0, 8))
 
@@ -690,6 +691,11 @@ class PureScaleApp(ctk.CTk):
         self.split_label.configure(text=f"Split: {int(round(val * 100))}%")
         self.canvas.set_split_pos(val, notify=False)
 
+    def _on_auto_style_toggle(self) -> None:
+        """Immediately applies auto-detected style to the selector if switched on."""
+        if self.auto_style_switch.get() and self.current_diagnostics:
+            self._sync_routed_style(self.current_diagnostics)
+
     def _run_quick_diagnostics_async(self, bgr: np.ndarray) -> None:
         """Runs fast diagnostic signal analysis and updates HUD."""
         def diag_worker():
@@ -698,6 +704,8 @@ class PureScaleApp(ctk.CTk):
                 diag = diagnose_image(bgr, semantic_breakdown=sem.breakdown)
                 self.current_diagnostics = diag
                 self.after(0, lambda d=diag: self.hud_card.update_diagnostics(d))
+                if self.auto_style_switch.get():
+                    self.after(0, lambda d=diag: self._sync_routed_style(d))
             except (cv2.error, ValueError, TypeError, RuntimeError) as e:
                 logger.warning("Quick diagnostics background analysis failed: %s", e)
 
@@ -793,6 +801,7 @@ class PureScaleApp(ctk.CTk):
             self.current_diagnostics = diagnose_image(self.current_orig_bgr)
             self.hud_card.update_diagnostics(self.current_diagnostics)
 
+        self._sync_routed_style(self.current_diagnostics)
         self._apply_diagnostics_to_ui(self.current_diagnostics)
         self._start_enhancement_async()
 

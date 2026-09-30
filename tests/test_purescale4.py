@@ -666,6 +666,13 @@ class TestPureScale4CliAndGui(unittest.TestCase):
             low = DiagnosticsResult(suggested_style="anime", style_confidence=0.30)
             self.assertIsNone(app._routed_style_label(low))
 
+            # Auto-style switch toggle syncs selector on demand.
+            app.current_diagnostics = diag
+            app.style_seg.set("Photo")
+            app.auto_style_switch.select()
+            app._on_auto_style_toggle()
+            self.assertEqual(app.style_seg.get(), "Anime")
+
             app.destroy()
         except Exception as e:
             if _is_display_error(e):
