@@ -28,7 +28,7 @@ from purescale.config import (
 from purescale.dsp.diagnostics import auto_tune_parameters, diagnose_image
 from purescale.dsp.semantic import extract_semantic_masks
 from purescale.gui.canvas import InteractiveCanvas
-from purescale.gui.components import DiagnosticsHUDCard, LabeledSlider, ParameterCard
+from purescale.gui.components import DiagnosticsHUDCard, LabeledSlider, ParameterCard, PresetPicker
 from purescale.gui.scrolling import SmoothScrollableFrame
 from purescale.pipeline import PureScalePipeline
 
@@ -474,30 +474,14 @@ class PureScaleApp(ctk.CTk):
         preset_row = ctk.CTkFrame(self.preset_card, fg_color="transparent")
         preset_row.pack(fill="x", padx=8, pady=(4, 8))
 
-        self.preset_opt = ctk.CTkComboBox(
+        self.preset_opt = PresetPicker(
             preset_row,
             values=[name.title() for name in PRESETS],
             command=self._on_preset_change,
-            fg_color=PALETTE["surface"],
-            border_color=PALETTE["border"],
-            button_color=PALETTE["accent"],
-            button_hover_color=PALETTE["accent_hover"],
-            text_color=PALETTE["text"],
-            dropdown_fg_color=PALETTE["surface"],
-            dropdown_hover_color=PALETTE["surface_hover"],
-            dropdown_text_color=PALETTE["text"],
-            corner_radius=6,
-            height=32,
-            justify="center",
-            font=font("mono11b"),
-            dropdown_font=font("ui11"),
         )
         self.preset_opt.set("Balanced")
         self._current_preset = "Balanced"
         self.preset_opt.pack(side="left", fill="x", expand=True, padx=(0, 6))
-        # Commit typed text on Enter/Tab (picker only fires on list clicks).
-        self.preset_opt.bind("<Return>", lambda _e: self._on_preset_change(self.preset_opt.get()))
-        self.preset_opt.bind("<FocusOut>", lambda _e: self._on_preset_change(self.preset_opt.get()))
 
         self.btn_reset_params = ctk.CTkButton(
             preset_row,

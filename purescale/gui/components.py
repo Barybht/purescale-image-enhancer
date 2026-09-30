@@ -1,6 +1,7 @@
-"""Modular UI card components, sliders, and badges for Obsidian Studio."""
+"""Modular UI card components, sliders, badges, and pickers for Obsidian Studio."""
 
-from typing import Callable, Optional
+from typing import Callable, List, Optional
+import tkinter as tk
 import customtkinter as ctk
 from purescale.gui.theme import PALETTE, font
 from tkinter import messagebox
@@ -148,6 +149,218 @@ class LabeledSlider(ctk.CTkFrame):
         self.slider.configure(state=state)
         self.name_label.configure(text_color=PALETTE["text_muted"] if enabled else PALETTE["text_faint"])
         self.val_label.configure(text_color=PALETTE["accent_bright"] if enabled else PALETTE["text_faint"])
+
+
+class PresetPicker(ctk.CTkFrame):
+    """Themed preset picker with an owned popup list.
+
+    Replaces CTkComboBox, whose system popup cannot be themed (white frame)
+    and always expands to the full item count. This popup shows exactly
+    ROWS_VISIBLE rows with a themed scrollbar, a live filter entry, and a
+    1px themed border. Keyboard: type to filter, Up/Down to move,
+    Enter to apply, Escape to dismiss.
+    """
+
+    ROWS_VISIBLE = 5
+    ROW_HEIGHT_PX = 30
+
+    def __init__(
+        self,
+        master,
+        values: List[str],
+        command: Optional[Callable[[str], None]] = None,
+        **kwargs,
+    ):
+        kwargs.setdefault("fg_color", "transparent")
+        super().__init__(master, **kwargs)
+        self._values = list(values)
+        self._command = command
+        self._current = self._values[0] if self._values else ""
+        self._popup: Optional[tk.Toplevel] = None
+        self._wheel_ids: list = []
+
+        self._field = ctk.CTkButton(
+            self,
+            text=self._current,
+            command=self.toggle,
+            anchor="center",
+            height=32,
+            corner_radius=6,
+            fg_color=PALETTE["surface"],
+            hover_color=PALETTE["surface_hover"],
+            text_color=PALETTE["text"],
+            font=font("mono11b"),
+        )
+        self._field.pack(fill="x")
+
+    def get(self) -> str:
+        """Returns the current preset label."""
+        return self._current
+
+    def set(self, label: str) -> None:
+        """Sets the current preset label without firing the callback."""
+        self._current = label
+        self._field.configure(text=label)
+
+    def toggle(self) -> None:
+        """Opens the popup, or closes it when already open."""
+        if self._popup is not None:
+            self.close()
+        else:
+            self.open()
+
+    def open(self) -> None:
+        """Shows the popup under the field (flips above near screen bottom)."""
+        if self._popup is not None:
+            return
+        root = self.winfo_toplevel()
+        pop = tk.Toplevel(root)
+        pop.withdraw()
+        pop.overrideredirect(True)
+        pop.configure(bg=PALETTE["border"])
+        try:
+            pop.attributes("-topmost", True)
+        except tk.TclError:
+            pass
+
+        row_h = self.ROW_HEIGHT_PX
+        list_h = row_h * self.ROWS_VISIBLE
+        chrome_h = 46
+        w = max(160, self._field.winfo_width())
+        h = chrome_h + list_h
+        x = self._field.winfo_rootx()
+        y = self._field.winfo_rooty() + self._field.winfo_height() + 4
+        if y + h > root.winfo_screenheight() - 40:
+            y = max(0, self._field.winfo_rooty() - h - 4)
+        pop.geometry(f"{w}x{h}+{x}+{y}")
+
+        frame = ctk.CTkFrame(pop, fg_color=PALETTE["surface"], corner_radius=6)
+        frame.pack(fill="both", expand=True, padx=1, pady=1)
+
+        self._filter_entry = ctk.CTkEntry(
+            frame,
+            placeholder_text="Type to filter...",
+            height=30,
+            corner_radius=6,
+            fg_color=PALETTE["bg_app"],
+            border_color=PALETTE["border"],
+            text_color=PALETTE["text"],
+            placeholder_text_color=PALETTE["text_faint"],
+            font=font("ui11"),
+        )
+        self._filter_entry.pack(fill="x", padx=6, pady=(6, 4))
+        self._filter_entry.bind("<KeyRelease>", self._on_filter)
+
+        list_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        list_frame.pack(fill="both", expand=True, padx=6, pady=(0, 6))
+
+        self._listbox = tk.Listbox(
+            list_frame,
+            height=self.ROWS_VISIBLE,
+            activestyle="none",
+            highlightthickness=0,
+            borderwidth=0,
+            relief="flat",
+            bg=PALETTE["surface"],
+            fg=PALETTE["text"],
+            selectbackground=PALETTE["accent"],
+            selectforeground=PALETTE["text"],
+            font=("Consolas", 11),
+        )
+        self._listbox.pack(side="left", fill="both", expand=True)
+        scroll = tk.Scrollbar(
+            list_frame,
+            orient="vertical",
+            command=self._listbox.yview,
+            bg=PALETTE["surface_hover"],
+            troughcolor=PALETTE["surface"],
+            activebackground=PALETTE["accent"],
+            borderwidth=0,
+            highlightthickness=0,
+            elementborderwidth=0,
+            width=14,
+        )
+        scroll.pack(side="right", fill="y")
+        self._listbox.configure(yscrollcommand=scroll.set)
+
+        self._refill("")
+        self._listbox.bind("<<ListboxSelect>>", lambda _e: self._choose())
+        self._listbox.bind("<Return>", lambda _e: self._choose())
+        pop.bind("<Escape>", lambda _e: self.close())
+        pop.bind("<FocusOut>", lambda _e: self._close_if_unfocused(pop))
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self._wheel_ids.append((seq, root.bind(seq, lambda _e: self.close(), add=True)))
+
+        self._popup = pop
+        pop.deiconify()
+        self._filter_entry.focus_set()
+
+    def _refill(self, query: str) -> None:
+        items = [v for v in self._values if query.lower() in v.lower()]
+        self._listbox.delete(0, "end")
+        for item in items:
+            self._listbox.insert("end", item)
+        try:
+            idx = items.index(self._current)
+        except ValueError:
+            idx = 0 if items else None
+        if idx is not None:
+            self._listbox.selection_set(idx)
+            self._listbox.see(idx)
+
+    def _on_filter(self, _event=None) -> None:
+        if self._popup is None:
+            return
+        self._refill(self._filter_entry.get())
+
+    def _choose(self) -> None:
+        if self._popup is None:
+            return
+        sel = self._listbox.curselection()
+        if not sel:
+            return
+        label = self._listbox.get(sel[0])
+        self.close()
+        self.set(label)
+        if self._command:
+            self._command(label)
+
+    def _close_if_unfocused(self, pop: tk.Toplevel) -> None:
+        if self._popup is not pop:
+            return
+
+        def check():
+            if self._popup is not pop:
+                return
+            try:
+                fw = pop.focus_get()
+            except tk.TclError:
+                fw = None
+            if fw is None or not str(fw).startswith(str(pop) + "."):
+                self.close()
+
+        self.after(20, check)
+
+    def close(self) -> None:
+        """Destroys the popup and releases global bindings."""
+        pop, self._popup = self._popup, None
+        if self._wheel_ids:
+            try:
+                root = self.winfo_toplevel()
+                for seq, funcid in self._wheel_ids:
+                    root.unbind(seq, funcid)
+            except tk.TclError:
+                pass
+            self._wheel_ids = []
+        if pop is not None:
+            try:
+                pop.destroy()
+            except tk.TclError:
+                pass
+            try:
+                self._field.focus_set()
+            except tk.TclError:
+                pass
 
 
 class DiagnosticsHUDCard(ParameterCard):

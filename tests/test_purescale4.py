@@ -918,6 +918,50 @@ class TestPureScale4CliAndGui(unittest.TestCase):
             else:
                 raise e
 
+    def test_gui_preset_picker_popup(self):
+        if not _TK_AVAILABLE:
+            self.skipTest("tkinter not available on this runner")
+        try:
+            import customtkinter  # noqa: F401
+        except ImportError as e:
+            self.skipTest(f"GUI dependencies not installed: {e}")
+        from purescale.gui.app import PureScaleApp
+        from purescale.gui.theme import PALETTE
+        try:
+            app = PureScaleApp()
+            app.update_idletasks()
+            picker = app.preset_opt
+            self.assertEqual(picker.get(), "Balanced")
+
+            picker.open()
+            app.update_idletasks()
+            pop = picker._popup
+            self.assertIsNotNone(pop)
+            # Owned popup: no system frame, themed background.
+            self.assertTrue(pop.overrideredirect())
+            self.assertEqual(pop.cget("bg"), PALETTE["border"])
+            # Exactly 5 visible rows regardless of the 20 presets.
+            self.assertEqual(int(picker._listbox.cget("height")), 5)
+            self.assertEqual(picker._listbox.size(), 20)
+
+            # Filter narrows; choosing applies through the preset callback.
+            picker._filter_entry.insert(0, "man")
+            picker._on_filter()
+            self.assertEqual(picker._listbox.size(), 1)
+            picker._listbox.selection_clear(0, "end")
+            picker._listbox.selection_set(0)
+            picker._choose()
+            self.assertEqual(picker.get(), "Manga")
+            self.assertIsNone(picker._popup)
+            self.assertEqual(picker._wheel_ids, [])
+
+            app.destroy()
+        except Exception as e:
+            if _is_display_error(e):
+                self.skipTest(f"Headless display not available: {e}")
+            else:
+                raise e
+
     def test_gui_manual_reset_button(self):
         if not _TK_AVAILABLE:
             self.skipTest("tkinter not available on this runner")
