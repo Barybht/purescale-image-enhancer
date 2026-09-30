@@ -474,11 +474,12 @@ class PureScaleApp(ctk.CTk):
         preset_row = ctk.CTkFrame(self.preset_card, fg_color="transparent")
         preset_row.pack(fill="x", padx=8, pady=(4, 8))
 
-        self.preset_opt = ctk.CTkOptionMenu(
+        self.preset_opt = ctk.CTkComboBox(
             preset_row,
             values=[name.title() for name in PRESETS],
             command=self._on_preset_change,
             fg_color=PALETTE["surface"],
+            border_color=PALETTE["border"],
             button_color=PALETTE["accent"],
             button_hover_color=PALETTE["accent_hover"],
             text_color=PALETTE["text"],
@@ -487,12 +488,16 @@ class PureScaleApp(ctk.CTk):
             dropdown_text_color=PALETTE["text"],
             corner_radius=6,
             height=32,
-            anchor="center",
+            justify="center",
             font=font("mono11b"),
             dropdown_font=font("ui11"),
         )
         self.preset_opt.set("Balanced")
+        self._current_preset = "Balanced"
         self.preset_opt.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        # Commit typed text on Enter/Tab (picker only fires on list clicks).
+        self.preset_opt.bind("<Return>", lambda _e: self._on_preset_change(self.preset_opt.get()))
+        self.preset_opt.bind("<FocusOut>", lambda _e: self._on_preset_change(self.preset_opt.get()))
 
         self.btn_reset_params = ctk.CTkButton(
             preset_row,
@@ -780,13 +785,17 @@ class PureScaleApp(ctk.CTk):
 
     def _on_preset_change(self, preset_name: str) -> None:
         """Loads preset configuration into slider widgets."""
-        # CTkOptionMenu may pass a tkinter Event on some bindings; guard.
+        # ComboBox bindings may pass a tkinter Event; guard.
         if not isinstance(preset_name, str):
             return
         try:
             cfg = get_preset_config(preset_name)
         except ValueError:
+            # Typed text matched no preset: revert the box, keep sliders.
+            self.preset_opt.set(self._current_preset)
             return
+        self._current_preset = preset_name.title()
+        self.preset_opt.set(self._current_preset)
         self.scale_slider.set(cfg.scale)
         self.cas_slider.set(cfg.sharpen_strength)
         self.denoise_slider.set(cfg.denoise_intensity)
