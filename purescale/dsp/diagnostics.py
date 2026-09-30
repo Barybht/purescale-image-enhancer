@@ -809,8 +809,8 @@ def auto_tune_parameters(diag: DiagnosticsResult) -> Dict[str, Any]:
     else:
         params["brightness_shift"] = 0
 
-    # 5. Atmospheric Dehazing
-    if diag.haze_detected or diag.haze_index > 0.20:
+    # 5. Atmospheric Dehazing (single 0.18 threshold lives in the estimator)
+    if diag.haze_detected:
         params["enable_dehaze"] = True
         params["dehaze_strength"] = float(round(np.clip((diag.haze_index - 0.15) * 1.8, 0.3, 0.85), 2))
         explanations.append(f"Atmospheric haze detected (index={diag.haze_index:.2f}): enabled DCP dehaze ({params['dehaze_strength']:.2f}).")
