@@ -48,7 +48,7 @@ class InteractiveCanvas(tk.Canvas):
         # Linux wheel (X11 sends Button-4/5 instead of MouseWheel)
         self.bind("<Button-4>", lambda e: self._zoom_at(e.x, e.y, 1.15))
         self.bind("<Button-5>", lambda e: self._zoom_at(e.x, e.y, 0.85))
-        self.bind("<Double-Button-1>", lambda e: self.fit_to_window())
+        self.bind("<Double-Button-1>", self._on_double_click)
 
     def _active_ref_image(self) -> Optional[Image.Image]:
         """Returns the PIL image that defines the active display geometry."""
@@ -291,6 +291,14 @@ class InteractiveCanvas(tk.Canvas):
     def _on_drag_release(self, event) -> None:
         self.dragging_divider = False
 
+    def _on_double_click(self, event) -> None:
+        """Recenters the split divider (near it), else fits to window."""
+        div_x = self._get_divider_screen_x()
+        if div_x is not None and abs(event.x - div_x) <= 18:
+            self.set_split_pos(0.5)
+        else:
+            self.fit_to_window()
+
     def _on_mouse_wheel(self, event) -> None:
         factor = 1.15 if event.delta > 0 else 0.85
         self._zoom_at(event.x, event.y, factor)
@@ -407,34 +415,35 @@ class InteractiveCanvas(tk.Canvas):
                 div_screen_x, center_y,
                 text="< | >",
                 fill=PALETTE["accent_bright"],
-                font=("Consolas", 8, "bold")
+                font=font("mono8b")
             )
 
-            # Badges with pill backgrounds
+            # Badges pinned to the image corners (never collide with the
+            # divider at extreme split positions). Skipped on narrow views.
             badge_y = max(24, top_y + 24)
+            if disp_w >= 220:
+                # Left Badge (Original)
+                self.create_rectangle(
+                    x1 + 10, badge_y - 12,
+                    x1 + 90, badge_y + 12,
+                    fill=PALETTE["bg_bar"], outline=PALETTE["hover_light"], width=1
+                )
+                self.create_text(
+                    x1 + 50, badge_y,
+                    text="ORIGINAL",
+                    fill=PALETTE["text_muted"],
+                    font=font("mono9b"),
+                )
 
-            # Left Badge (Original)
-            self.create_rectangle(
-                div_screen_x - 90, badge_y - 12,
-                div_screen_x - 10, badge_y + 12,
-                fill=PALETTE["bg_bar"], outline=PALETTE["hover_light"], width=1
-            )
-            self.create_text(
-                div_screen_x - 50, badge_y,
-                text="ORIGINAL",
-                fill=PALETTE["text_muted"],
-                font=("Consolas", 9, "bold")
-            )
-
-            # Right Badge (Enhanced)
-            self.create_rectangle(
-                div_screen_x + 10, badge_y - 12,
-                div_screen_x + 90, badge_y + 12,
-                fill=PALETTE["bg_bar"], outline=PALETTE["accent"], width=1
-            )
-            self.create_text(
-                div_screen_x + 50, badge_y,
-                text="ENHANCED",
-                fill=PALETTE["accent_bright"],
-                font=("Consolas", 9, "bold")
-            )
+                # Right Badge (Enhanced)
+                self.create_rectangle(
+                    x1 + disp_w - 90, badge_y - 12,
+                    x1 + disp_w - 10, badge_y + 12,
+                    fill=PALETTE["bg_bar"], outline=PALETTE["accent"], width=1
+                )
+                self.create_text(
+                    x1 + disp_w - 50, badge_y,
+                    text="ENHANCED",
+                    fill=PALETTE["accent_bright"],
+                    font=font("mono9b"),
+                )

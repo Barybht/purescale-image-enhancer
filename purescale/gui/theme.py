@@ -43,6 +43,7 @@ _FONTS = {
     "mono11": ("Consolas", 11, "normal"),
     "mono10b": ("Consolas", 10, "bold"),
     "mono9b": ("Consolas", 9, "bold"),
+    "mono8b": ("Consolas", 8, "bold"),
     "ui13b": ("Segoe UI", 13, "bold"),
     "ui12b": ("Segoe UI", 12, "bold"),
     "ui11": ("Segoe UI", 11, "normal"),
