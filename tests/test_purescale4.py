@@ -1486,6 +1486,20 @@ class TestPureScale4AutoStyle(unittest.TestCase):
             img = _style_probe(kind)
             self.assertEqual(classify_content_style(img), classify_content_style(img))
 
+    def test_diagnose_image_input_guard(self):
+        from purescale.dsp.diagnostics import diagnose_image
+
+        with self.assertRaises(ValueError):
+            diagnose_image(None)
+        with self.assertRaises(ValueError):
+            diagnose_image(np.zeros((0, 0, 3), dtype=np.uint8))
+        with self.assertRaises(ValueError):
+            diagnose_image(np.zeros((16, 16, 2), dtype=np.uint8))
+        # 2D grayscale is promoted, not rejected.
+        gray = cv2.cvtColor(_style_probe("photo"), cv2.COLOR_BGR2GRAY)
+        res = diagnose_image(gray)
+        self.assertGreaterEqual(res.noise_sigma, 0.0)
+
     def test_pipeline_manga_routing(self):
         pipeline = PureScalePipeline()
         cfg = PipelineConfig(mode=ProcessingMode.PURE_DSP, scale=1.0, auto_style=True)

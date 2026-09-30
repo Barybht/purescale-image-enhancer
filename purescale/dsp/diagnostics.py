@@ -659,7 +659,18 @@ def diagnose_image(
 
     Returns:
         DiagnosticsResult populated with all physical signal metrics and auto-tune parameters
+
+    Raises:
+        ValueError: If ``img_bgr`` is None, empty, or not a 2D/3-channel image.
     """
+    if img_bgr is None or not isinstance(img_bgr, np.ndarray) or img_bgr.size == 0:
+        raise ValueError("diagnose_image requires a non-empty image array.")
+    if img_bgr.ndim == 2:
+        img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_GRAY2BGR)
+    if img_bgr.ndim != 3 or img_bgr.shape[2] not in (3, 4):
+        raise ValueError(f"diagnose_image requires BGR/BGRA input, got shape {img_bgr.shape}.")
+    if img_bgr.shape[2] == 4:
+        img_bgr = img_bgr[:, :, :3]
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
     # 1. Wavelet MAD Noise Estimation (Luma + Chroma)
