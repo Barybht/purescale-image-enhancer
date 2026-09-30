@@ -1081,6 +1081,37 @@ class TestPureScale4AutoStyle(unittest.TestCase):
             style_3d, _ = classify_content_style(gray_3d)
             self.assertEqual(style_3d, "photo", f"3D grayscale {fname} misclassified as {style_3d}")
 
+    def test_classifier_edge_cases(self):
+        """Tests that irregular/edge-case inputs do not raise errors."""
+        from purescale.dsp.diagnostics import classify_content_style
+
+        # None / empty / tiny inputs
+        self.assertEqual(classify_content_style(None)[0], "photo")
+        self.assertEqual(classify_content_style(np.zeros((0, 0, 3), dtype=np.uint8))[0], "photo")
+        self.assertEqual(classify_content_style(np.full((2, 2, 3), 128, dtype=np.uint8))[0], "photo")
+
+        # 3D 1-channel grayscale
+        gray_3d_1ch = np.zeros((64, 64, 1), dtype=np.uint8)
+        self.assertEqual(classify_content_style(gray_3d_1ch)[0], "photo")
+
+        # 4-channel BGRA
+        bgra = np.full((64, 64, 4), 180, dtype=np.uint8)
+        self.assertEqual(classify_content_style(bgra)[0], "photo")
+
+    def test_classifier_painterly_illustration(self):
+        """Tests that digital illustrations with background lighting/gradients route to anime."""
+        from purescale.dsp.diagnostics import classify_content_style
+
+        # Digital character in front of atmospheric sky gradient
+        sky = np.linspace(240, 60, 128, dtype=np.float32)[:, None].repeat(128, axis=1)
+        ill = np.stack([sky, sky * 0.75, sky * 0.15], axis=-1).astype(np.uint8)
+        ill[40:100, 40:90] = [40, 160, 230] # character body
+        cv2.rectangle(ill, (40, 40), (90, 100), (15, 15, 15), 2) # outline
+
+        style, conf = classify_content_style(ill)
+        self.assertEqual(style, "anime")
+        self.assertGreaterEqual(conf, 0.60)
+
     def test_classifier_determinism(self):
         from purescale.dsp.diagnostics import classify_content_style
 

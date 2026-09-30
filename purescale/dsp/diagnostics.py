@@ -304,9 +304,18 @@ def classify_content_style(img_bgr: np.ndarray) -> Tuple[str, float]:
     Returns:
         Tuple of (style, confidence in [0.0, 1.0]).
     """
+    if img_bgr is None or img_bgr.size == 0:
+        return "photo", 0.50
     if img_bgr.ndim == 2:
         img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_GRAY2BGR)
+    elif img_bgr.ndim == 3 and img_bgr.shape[2] == 1:
+        img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_GRAY2BGR)
+    elif img_bgr.ndim == 3 and img_bgr.shape[2] == 4:
+        img_bgr = cv2.cvtColor(img_bgr, cv2.COLOR_BGRA2BGR)
     h, w = img_bgr.shape[:2]
+    if h < 4 or w < 4:
+        return "photo", 0.50
+
     scale = min(1.0, 160.0 / max(h, w))
     if scale < 1.0:
         small = cv2.resize(img_bgr, (0, 0), fx=scale, fy=scale,
@@ -320,45 +329,53 @@ def classify_content_style(img_bgr: np.ndarray) -> Tuple[str, float]:
     q = (small.astype(np.uint16) >> 5).reshape(-1, 3)
     keys = q[:, 0] * 1024 + q[:, 1] * 32 + q[:, 2]
     n_pixels = float(q.shape[0])
-    uniq = float(len(np.unique(keys))) / n_pixels
     _vals, counts = np.unique(keys, return_counts=True)
+    if len(counts) == 0:
+        return "photo", 0.50
     counts = np.sort(counts)[::-1]
-    n95 = float(np.searchsorted(np.cumsum(counts) / counts.sum(), 0.95) + 1) / float(len(counts))
+    uniq = float(len(counts)) / n_pixels
+    cdf = np.cumsum(counts) / float(counts.sum())
+    n95 = float(np.searchsorted(cdf, 0.95) + 1) / float(len(counts))
+    n80 = float(np.searchsorted(cdf, 0.80) + 1) / float(len(counts))
 
     gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32)
     resid = float((gray - cv2.GaussianBlur(gray, (9, 9), 2.0)).std() / (gray.std() + 1e-6))
     extreme_tones = float(np.mean((gray > 215.0) | (gray < 45.0)))
 
+    mean5 = cv2.blur(gray, (5, 5))
+    mean_sq5 = cv2.blur(gray**2, (5, 5))
+    local_std = np.sqrt(np.maximum(0.0, mean_sq5 - mean5**2))
+    smooth_frac = float(np.mean(local_std < 5.0))
+
     if sat < 0.05 and uniq < 0.0035 and resid > 0.15 and extreme_tones > 0.50:
-        m1 = min((0.0035 - uniq) / 0.0035, 1.0)
-        m2 = min((resid - 0.15) / 0.30, 1.0)
-        m3 = min((extreme_tones - 0.50) / 0.30, 1.0)
+        m1 = float(np.clip((0.0035 - uniq) / 0.0035, 0.0, 1.0))
+        m2 = float(np.clip((resid - 0.15) / 0.30, 0.0, 1.0))
+        m3 = float(np.clip((extreme_tones - 0.50) / 0.30, 0.0, 1.0))
         return "manga", float(round(0.55 + 0.45 * min(m1, m2, m3), 3))
 
     if sat < 0.05 and resid > 0.60:
-        m1 = min((resid - 0.60) / 0.40, 1.0)
-        m2 = min((0.05 - sat) / 0.05, 1.0)
+        m1 = float(np.clip((resid - 0.60) / 0.40, 0.0, 1.0))
+        m2 = float(np.clip((0.05 - sat) / 0.05, 0.0, 1.0))
         return "manga", float(round(0.55 + 0.45 * min(m1, m2), 3))
 
     if resid > 0.75 and uniq < 0.001:
-        m1 = min((resid - 0.75) / 0.25, 1.0)
+        m1 = float(np.clip((resid - 0.75) / 0.25, 0.0, 1.0))
         return "manga", float(round(0.55 + 0.45 * m1, 3))
 
     if uniq < 0.001 and 0.20 < resid < 0.70 and sat >= 0.05:
-        m1 = min((0.001 - uniq) / 0.001, 1.0)
-        m2 = min((0.70 - resid) / 0.70, 1.0)
-        m3 = min((resid - 0.20) / 0.20, 1.0)
+        m1 = float(np.clip((0.001 - uniq) / 0.001, 0.0, 1.0))
+        m2 = float(np.clip((0.70 - resid) / 0.70, 0.0, 1.0))
+        m3 = float(np.clip((resid - 0.20) / 0.20, 0.0, 1.0))
         return "anime", float(round(0.55 + 0.45 * min(m1, m2, m3), 3))
 
-    if n95 < 0.20 and resid > 0.14 and sat > 0.10:
-        # Gate is strict (nearest natural photo in calibration: 0.24);
-        # confidence scales wider so typical illustration clears 0.60.
-        m1 = min((0.25 - n95) / 0.25, 1.0)
-        m2 = min((resid - 0.14) / 0.25, 1.0)
-        m3 = min((sat - 0.10) / 0.30, 1.0)
-        return "anime", float(round(0.55 + 0.45 * min(m1, m2, m3), 3))
+    if (n80 < 0.20 or n95 < 0.22) and resid > 0.14 and sat > 0.15 and smooth_frac > 0.18:
+        m1 = float(np.clip((0.22 - min(n80, n95)) / 0.20, 0.0, 1.0))
+        m2 = float(np.clip((resid - 0.14) / 0.25, 0.0, 1.0))
+        m3 = float(np.clip((sat - 0.15) / 0.35, 0.0, 1.0))
+        m4 = float(np.clip((smooth_frac - 0.18) / 0.25, 0.0, 1.0))
+        return "anime", float(round(0.60 + 0.40 * min(m1, m2, m3, m4), 3))
 
-    if sat > 0.15 and n95 >= 0.22:
+    if sat > 0.15 and n80 >= 0.25 and smooth_frac < 0.20:
         return "photo", 0.70
 
     return "photo", 0.60
