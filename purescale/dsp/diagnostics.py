@@ -62,7 +62,7 @@ class DiagnosticsResult:
             border,
             row(f"Sensor Noise Sigma  : {noise_str:<26}"),
             row(f"Optical Blur Score  : {self.blur_score:6.3f}       [{self.blur_category:<10}]"),
-            row(f"Dynamic Entropy     : {self.entropy:6.2f} bits    [Range: {self.dynamic_range:<3} levels]"),
+            row(f"Dynamic Entropy     : {self.entropy:6.2f} bits   [Rng {self.dynamic_range:<3} Mean {self.mean_luminance:5.1f}]"),
             row(f"Shadow/High Clipping: {self.shadow_clipping:5.1f}% / {self.highlight_clipping:4.1f}%"),
             row(f"Lighting Geometry   : {light_str:<26}"),
             row(f"Color Cast / Tint   : {wb_str:<26}"),
