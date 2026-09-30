@@ -30,9 +30,15 @@ from purescale.dsp.diagnostics import (
     auto_tune_parameters,
     diagnose_image,
     estimate_atmospheric_haze,
+    estimate_chroma_wavelet_noise_mad,
+    estimate_jpeg_blocking,
     estimate_optical_blur,
+    estimate_shades_of_gray_illuminant,
+    estimate_spatial_lighting_geometry,
     estimate_wavelet_noise_mad,
 )
+from purescale.dsp.color import bradford_cat16_white_balance
+
 from purescale.dsp.pyramid import (
     build_gaussian_pyramid,
     build_laplacian_pyramid,
@@ -103,6 +109,94 @@ class TestPureScale4Diagnostics(unittest.TestCase):
         haze_score, is_hazy = estimate_atmospheric_haze(hazy)
         self.assertTrue(is_hazy)
         self.assertGreater(haze_score, 0.25)
+
+    def test_chroma_wavelet_noise_mad(self):
+        # Pure clean canvas
+        clean = np.full((128, 128, 3), 128, dtype=np.uint8)
+        sigma_clean, cat_clean = estimate_chroma_wavelet_noise_mad(clean)
+        self.assertEqual(sigma_clean, 0.0)
+        self.assertEqual(cat_clean, "Clean")
+
+        # Inject pure chroma noise on Cr/Cb without changing luma
+        ycrcb = cv2.cvtColor(clean, cv2.COLOR_BGR2YCrCb).astype(np.float32)
+        np.random.seed(42)
+        ycrcb[:, :, 1] += np.random.normal(0, 10.0, (128, 128))
+        ycrcb[:, :, 2] += np.random.normal(0, 10.0, (128, 128))
+        noisy_chroma = cv2.cvtColor(np.clip(ycrcb, 0, 255).astype(np.uint8), cv2.COLOR_YCrCb2BGR)
+
+        sigma_c, cat_c = estimate_chroma_wavelet_noise_mad(noisy_chroma)
+        self.assertAlmostEqual(sigma_c, 10.0, delta=2.5)
+        self.assertIn(cat_c, ("Moderate", "Heavy"))
+
+    def test_optical_blur_sparse_edges(self):
+        # A sharp minimalist square on a large background should NOT score as blurred
+        canvas = np.full((400, 400), 200, dtype=np.uint8)
+        canvas[150:250, 150:250] = 50
+        blur_score, cat = estimate_optical_blur(canvas)
+        self.assertLess(blur_score, 0.30)
+        self.assertEqual(cat, "Sharp")
+
+        # Blurring the square should increase blur score to soft/blurred
+        blurred_canvas = cv2.GaussianBlur(canvas, (21, 21), 6.0)
+        blur_soft, cat_soft = estimate_optical_blur(blurred_canvas)
+        self.assertGreater(blur_soft, blur_score)
+        self.assertGreaterEqual(blur_soft, 0.50)
+
+    def test_spatial_lighting_geometry_backlight(self):
+        # Balanced lighting
+        balanced = np.full((160, 160), 128, dtype=np.uint8)
+        ratio_bal, is_backlit_bal = estimate_spatial_lighting_geometry(balanced)
+        self.assertFalse(is_backlit_bal)
+        self.assertAlmostEqual(ratio_bal, 1.0, delta=0.2)
+
+        # Backlit subject: dark center silhouette with blown highlights on periphery
+        backlit = np.full((160, 160), 220, dtype=np.uint8)
+        backlit[40:120, 40:120] = 35
+        ratio_bl, is_backlit_bl = estimate_spatial_lighting_geometry(backlit)
+        self.assertTrue(is_backlit_bl)
+        self.assertGreater(ratio_bl, 2.0)
+
+    def test_jpeg_blocking_detection(self):
+        # Smooth uncompressed gradient
+        x = np.linspace(40, 220, 256, dtype=np.uint8)
+        smooth = np.tile(x, (256, 1))
+        score_smooth, is_blocked_smooth = estimate_jpeg_blocking(smooth)
+        self.assertFalse(is_blocked_smooth)
+
+        # Heavy JPEG compression
+        _, buf = cv2.imencode(".jpg", smooth, [cv2.IMWRITE_JPEG_QUALITY, 20])
+        jpg = cv2.imdecode(buf, cv2.IMREAD_GRAYSCALE)
+        score_jpg, is_blocked_jpg = estimate_jpeg_blocking(jpg)
+        self.assertTrue(is_blocked_jpg)
+        self.assertGreater(score_jpg, 1.25)
+
+    def test_shades_of_gray_with_tint(self):
+        base = np.full((100, 100, 3), 128, dtype=np.uint8)
+        # Green tint (elevated G)
+        green = base.copy()
+        green[:, :, 1] = 165
+        t_off, tint_off, cast = estimate_shades_of_gray_illuminant(green, return_tint=True)
+        self.assertEqual(cast, "Green")
+        self.assertGreater(tint_off, 0)
+
+        # Magenta tint (depressed G)
+        magenta = base.copy()
+        magenta[:, :, 1] = 95
+        t_off, tint_off, cast = estimate_shades_of_gray_illuminant(magenta, return_tint=True)
+        self.assertEqual(cast, "Magenta")
+        self.assertLess(tint_off, 0)
+
+    def test_bradford_cat16_with_tint(self):
+        img = np.full((32, 32, 3), 128, dtype=np.uint8)
+        # Identity
+        identity = bradford_cat16_white_balance(img, temperature_offset=0, tint_offset=0)
+        self.assertTrue(np.array_equal(img, identity))
+
+        # Magenta correction shifts green channel down and red/blue up
+        mag_adapted = bradford_cat16_white_balance(img, temperature_offset=0, tint_offset=20)
+        self.assertGreater(int(mag_adapted[16, 16, 2]), 128) # Red boosted
+        self.assertLess(int(mag_adapted[16, 16, 1]), 128)    # Green attenuated
+
 
 
 class TestPureScale4Pyramids(unittest.TestCase):
@@ -679,6 +773,38 @@ class TestPureScale4CliAndGui(unittest.TestCase):
                 self.skipTest(f"Headless display not available: {e}")
             else:
                 raise e
+
+    def test_gui_diagnostics_tint_and_local_tone_sync(self):
+        if not _TK_AVAILABLE:
+            self.skipTest("tkinter not available on this runner")
+        try:
+            import customtkinter  # noqa: F401
+        except ImportError as e:
+            self.skipTest(f"GUI dependencies not installed: {e}")
+        from purescale.gui.app import PureScaleApp
+        try:
+            app = PureScaleApp()
+            from purescale.config import DiagnosticsResult
+            diag = DiagnosticsResult(
+                shadow_clipping=8.0,
+                highlight_clipping=5.0,
+                color_cast_kelvin=-15,
+                color_tint_offset=10,
+            )
+            diag.recommended_parameters = auto_tune_parameters(diag)
+            app._apply_diagnostics_to_ui(diag)
+            self.assertTrue(bool(app.local_tone_switch.get()))
+            self.assertEqual(int(app.temp_slider.get()), -15)
+            self.assertEqual(int(app.tint_slider.get()), 10)
+            self.assertGreater(float(app.shadow_boost_slider.get()), 0.3)
+
+            app.destroy()
+        except Exception as e:
+            if _is_display_error(e):
+                self.skipTest(f"Headless display not available: {e}")
+            else:
+                raise e
+
 
 
 class TestPureScale4GuiScrolling(unittest.TestCase):

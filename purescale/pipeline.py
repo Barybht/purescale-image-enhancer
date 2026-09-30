@@ -280,11 +280,15 @@ class PureScalePipeline:
         report: Callable[[str, float], None],
         stage_latencies: Dict[str, float],
     ) -> np.ndarray:
-        if cfg.color_temperature == 0:
+        if cfg.color_temperature == 0 and getattr(cfg, "color_tint", 0) == 0:
             return cur
         report(progress_label, progress_ratio)
         t0 = time.perf_counter()
-        cur = bradford_cat16_white_balance(cur, temperature_offset=cfg.color_temperature)
+        cur = bradford_cat16_white_balance(
+            cur,
+            temperature_offset=cfg.color_temperature,
+            tint_offset=getattr(cfg, "color_tint", 0),
+        )
         stage_latencies["cat16_wb"] = (time.perf_counter() - t0) * 1000.0
         return cur
 

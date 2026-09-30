@@ -121,6 +121,7 @@ class PipelineConfig:
     # Perceptual Color & White Balance (Oklab & Bradford CAT16)
     vibrance_boost: float = 1.10
     color_temperature: int = 0
+    color_tint: int = 0
 
     # Pre-Restoration Conditioning (De-pixelate & Deblur)
     depixel_strength: int = 0
@@ -185,6 +186,7 @@ class PipelineConfig:
         _range("shadow_boost", 0.0, 1.0)
         _range("vibrance_boost", 1.0, 1.5)
         _range("color_temperature", -30, 30)
+        _range("color_tint", -30, 30)
         _range("depixel_strength", 0, 100)
         _range("deblur_strength", 0, 100)
         _range("portrait_smooth", 0, 100)
@@ -251,6 +253,8 @@ class PipelineConfig:
             "shadow_boost": self.shadow_boost,
             "vibrance_boost": self.vibrance_boost,
             "color_temperature": self.color_temperature,
+            "color_tint": self.color_tint,
+
             "depixel_strength": self.depixel_strength,
             "deblur_strength": self.deblur_strength,
             "portrait_smooth": self.portrait_smooth,

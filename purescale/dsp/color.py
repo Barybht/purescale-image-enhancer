@@ -133,19 +133,38 @@ _M_CAT = np.array([
 _M_CAT_INV = np.linalg.inv(_M_CAT)
 
 
-def bradford_cat16_white_balance(bgr: np.ndarray, temperature_offset: int = 0) -> np.ndarray:
+def bradford_cat16_white_balance(
+    bgr: np.ndarray,
+    temperature_offset: int = 0,
+    tint_offset: int = 0,
+) -> np.ndarray:
     """
     Bradford / CAT16 Chromatic Adaptation Transform.
-    Adjusts white balance color temperature in the LMS cone domain using a von Kries diagonal transform
-    derived from the CAT16/CAT02 cone response matrix.
+    Adjusts white balance color temperature and green/magenta tint in the LMS cone domain
+    using a 2D von Kries diagonal transform derived from the CAT16/CAT02 cone response matrix.
     Preserves neutral black shadows and specular white highlights without color clipping.
+
+    Args:
+        bgr: Input BGR image uint8 [H, W, 3]
+        temperature_offset: Warm (+)/Cool (-) temperature offset (-50 to +50)
+        tint_offset: Magenta (+)/Green (-) tint offset (-50 to +50)
+
+    Returns:
+        Adapted BGR image uint8 [H, W, 3]
     """
-    if temperature_offset == 0:
+    if temperature_offset == 0 and tint_offset == 0:
         return bgr.copy()
 
     # Temperature shift: positive = warmer (golden/amber), negative = cooler (daylight blue)
+    # Tint shift: positive = magenta (corrects green), negative = green (corrects magenta)
     delta_k = temperature_offset / 100.0
-    diag = np.diag([1.0 + 0.18 * delta_k, 1.0 + 0.04 * delta_k, 1.0 - 0.22 * delta_k]).astype(np.float32)
+    delta_tint = tint_offset / 100.0
+
+    diag = np.diag([
+        1.0 + 0.18 * delta_k + 0.10 * delta_tint,
+        1.0 + 0.04 * delta_k - 0.20 * delta_tint,
+        1.0 - 0.22 * delta_k + 0.10 * delta_tint,
+    ]).astype(np.float32)
 
     # Full adaptation matrix T = M_inv @ diag @ M
     t_mat = _M_CAT_INV @ diag @ _M_CAT
@@ -155,3 +174,4 @@ def bradford_cat16_white_balance(bgr: np.ndarray, temperature_offset: int = 0) -
     adapted_bgr = cv2.cvtColor(np.clip(adapted, 0.0, 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR)
 
     return adapted_bgr
+

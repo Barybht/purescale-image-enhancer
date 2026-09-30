@@ -24,11 +24,15 @@ from purescale.dsp.diagnostics import (
     diagnose_image,
     auto_tune_parameters,
     estimate_wavelet_noise_mad,
+    estimate_chroma_wavelet_noise_mad,
     estimate_optical_blur,
     estimate_dynamic_range_entropy,
+    estimate_spatial_lighting_geometry,
     estimate_shades_of_gray_illuminant,
     estimate_atmospheric_haze,
+    estimate_jpeg_blocking,
 )
+
 from purescale.dsp.pyramid import (
     multiscale_laplacian_filter,
     build_gaussian_pyramid,
@@ -63,10 +67,14 @@ __all__ = [
     "diagnose_image",
     "auto_tune_parameters",
     "estimate_wavelet_noise_mad",
+    "estimate_chroma_wavelet_noise_mad",
     "estimate_optical_blur",
     "estimate_dynamic_range_entropy",
+    "estimate_spatial_lighting_geometry",
     "estimate_shades_of_gray_illuminant",
     "estimate_atmospheric_haze",
+    "estimate_jpeg_blocking",
+
     "multiscale_laplacian_filter",
     "build_gaussian_pyramid",
     "build_laplacian_pyramid",

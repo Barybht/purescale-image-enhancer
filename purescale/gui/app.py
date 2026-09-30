@@ -528,6 +528,8 @@ class PureScaleApp(ctk.CTk):
         self.vibrance_slider.pack(fill="x", padx=8)
         self.temp_slider = LabeledSlider(color_card, label="CAT16 Color Temperature", from_=-30, to=30, default_val=0, step=5, is_float=False)
         self.temp_slider.pack(fill="x", padx=8)
+        self.tint_slider = LabeledSlider(color_card, label="CAT16 Green/Magenta Tint", from_=-30, to=30, default_val=0, step=5, is_float=False)
+        self.tint_slider.pack(fill="x", padx=8)
 
         # 11. Synchronized Portrait Retouching Card
         portrait_card = ParameterCard(
@@ -591,6 +593,7 @@ class PureScaleApp(ctk.CTk):
         # Perceptual Vibrance & Color Temp: enabled in PureDSP and Hybrid, disabled in Neural AI
         self.vibrance_slider.set_enabled(not is_neural)
         self.temp_slider.set_enabled(not is_neural)
+        self.tint_slider.set_enabled(not is_neural)
 
         # SWF Denoise: enabled in PureDSP and Hybrid, disabled in Neural AI
         self.denoise_switch.configure(state="normal" if not is_neural else "disabled")
@@ -623,6 +626,7 @@ class PureScaleApp(ctk.CTk):
         self.bright_slider.set(cfg.brightness_shift)
         self.vibrance_slider.set(cfg.vibrance_boost)
         self.temp_slider.set(cfg.color_temperature)
+        self.tint_slider.set(getattr(cfg, "color_tint", 0))
         self.smooth_slider.set(cfg.portrait_smooth)
         self.eye_slider.set(cfg.eye_clarity)
         self.depixel_slider.set(getattr(cfg, "depixel_strength", 0))
@@ -766,6 +770,8 @@ class PureScaleApp(ctk.CTk):
             self.bright_slider.set(rec["brightness_shift"])
         if "color_temperature" in rec:
             self.temp_slider.set(rec["color_temperature"])
+        if "color_tint" in rec:
+            self.tint_slider.set(rec["color_tint"])
         if "vibrance_boost" in rec:
             self.vibrance_slider.set(rec["vibrance_boost"])
         if "enable_dehaze" in rec:
@@ -838,6 +844,7 @@ class PureScaleApp(ctk.CTk):
             shadow_boost=self.shadow_boost_slider.get(),
             vibrance_boost=self.vibrance_slider.get(),
             color_temperature=int(self.temp_slider.get()),
+            color_tint=int(self.tint_slider.get()),
             depixel_strength=int(self.depixel_slider.get()),
             deblur_strength=int(self.deblur_slider.get()),
             portrait_smooth=int(self.smooth_slider.get()),

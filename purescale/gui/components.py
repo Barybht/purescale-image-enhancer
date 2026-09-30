@@ -182,6 +182,8 @@ class DiagnosticsHUDCard(ParameterCard):
         self.noise_val = create_metric_row("Noise Floor (MAD)")
         self.blur_val = create_metric_row("Optical Blur Index")
         self.entropy_val = create_metric_row("Dynamic Entropy")
+        self.cast_val = create_metric_row("White Balance")
+        self.light_val = create_metric_row("Lighting Geometry")
         self.haze_val = create_metric_row("Atmospheric Haze")
         self.style_val = create_metric_row("Content Style")
         self.scene_val = create_metric_row("Scene Semantics")
@@ -192,6 +194,8 @@ class DiagnosticsHUDCard(ParameterCard):
             self.noise_val.configure(text="--", text_color="#64748b")
             self.blur_val.configure(text="--", text_color="#64748b")
             self.entropy_val.configure(text="--", text_color="#64748b")
+            self.cast_val.configure(text="--", text_color="#64748b")
+            self.light_val.configure(text="--", text_color="#64748b")
             self.haze_val.configure(text="--", text_color="#64748b")
             self.style_val.configure(text="--", text_color="#64748b")
             self.scene_val.configure(text="--", text_color="#64748b")
@@ -199,7 +203,11 @@ class DiagnosticsHUDCard(ParameterCard):
 
         # Noise
         noise_color = "#4ade80" if diag.noise_sigma < 3.0 else ("#facc15" if diag.noise_sigma < 8.0 else "#f87171")
-        self.noise_val.configure(text=f"{diag.noise_sigma:.1f} [{diag.noise_category}]", text_color=noise_color)
+        chroma_sigma = float(getattr(diag, "chroma_noise_sigma", 0.0) or 0.0)
+        if chroma_sigma >= 3.0:
+            self.noise_val.configure(text=f"{diag.noise_sigma:.1f}Y/{chroma_sigma:.1f}C [{diag.noise_category}]", text_color=noise_color)
+        else:
+            self.noise_val.configure(text=f"{diag.noise_sigma:.1f} [{diag.noise_category}]", text_color=noise_color)
 
         # Blur
         blur_color = "#4ade80" if diag.blur_score < 0.3 else ("#facc15" if diag.blur_score < 0.6 else "#f87171")
@@ -207,6 +215,17 @@ class DiagnosticsHUDCard(ParameterCard):
 
         # Entropy
         self.entropy_val.configure(text=f"{diag.entropy:.1f} bits ({diag.dynamic_range} lvls)", text_color="#38bdf8")
+
+        # White Balance (CAT16 Temp / Tint)
+        tint_val = int(getattr(diag, "color_tint_offset", 0) or 0)
+        cast_color = "#4ade80" if (diag.color_cast_kelvin == 0 and tint_val == 0) else "#38bdf8"
+        self.cast_val.configure(text=f"{diag.color_cast_kelvin:+d}K/{tint_val:+d}T [{diag.color_cast_name}]", text_color=cast_color)
+
+        # Lighting Geometry (Backlight ratio)
+        backlight = bool(getattr(diag, "backlight_detected", False))
+        ratio = float(getattr(diag, "backlight_ratio", 1.0) or 1.0)
+        light_color = "#facc15" if backlight else "#4ade80"
+        self.light_val.configure(text=f"{'Backlit' if backlight else 'Balanced'} [{ratio:.1f}x]", text_color=light_color)
 
         # Haze
         haze_color = "#f87171" if diag.haze_detected else "#4ade80"
@@ -226,3 +245,4 @@ class DiagnosticsHUDCard(ParameterCard):
             self.scene_val.configure(text=", ".join(top_classes[:4]) if top_classes else "General", text_color="#cbd5e1")
         else:
             self.scene_val.configure(text="General", text_color="#cbd5e1")
+
