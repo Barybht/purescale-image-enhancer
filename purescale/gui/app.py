@@ -62,6 +62,7 @@ class PureScaleApp(ctk.CTk):
         self._detect_hardware()
         self._build_layout()
         self._bind_shortcuts()
+        self._setup_drag_and_drop()
 
     def _detect_hardware(self) -> None:
         """Determines active hardware acceleration device name."""
@@ -228,8 +229,32 @@ class PureScaleApp(ctk.CTk):
         self.bind("<equal>", lambda e: self.canvas.zoom_step(1.15))
         self.bind("<minus>", lambda e: self.canvas.zoom_step(0.85))
         self.bind("<underscore>", lambda e: self.canvas.zoom_step(0.85))
+        self.bind("<KP_Add>", lambda e: self.canvas.zoom_step(1.15))
+        self.bind("<KP_Subtract>", lambda e: self.canvas.zoom_step(0.85))
+        self.bind("<KP_1>", lambda e: self.canvas.zoom_100())
         self.bind("<r>", lambda e: self._on_reset_click())
         self.bind("<R>", lambda e: self._on_reset_click())
+
+    def _setup_drag_and_drop(self) -> None:
+        """Enables drag-and-drop file loading if supported by host environment."""
+        try:
+            import windnd
+            windnd.hook_dropfiles(self, func=self._on_dropped_files)
+        except Exception:
+            pass
+
+    def _on_dropped_files(self, files) -> None:
+        """Handles external file drop events onto the application window."""
+        if not files:
+            return
+        path = files[0]
+        if isinstance(path, bytes):
+            try:
+                path = path.decode("utf-8")
+            except UnicodeDecodeError:
+                path = path.decode("latin-1")
+        if os.path.isfile(path):
+            self.load_image(path)
 
     def _cycle_view_mode(self) -> None:
         """Cycles through view modes: Original -> Enhanced -> Split View -> Original."""
