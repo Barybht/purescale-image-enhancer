@@ -18,6 +18,9 @@ def bimef_exposure_fusion(img: np.ndarray, contrast_boost: float = 1.8) -> np.nd
 
     k_size = max(15, int(min(img.shape[:2]) * 0.03) | 1)
     base = cv2.GaussianBlur(luma, (k_size, k_size), 0)
+    # Blur rounding can push extremes a last-ulp outside [0, 1]; fractional
+    # powers below turn that into NaN (all-white/all-black frames).
+    base = np.clip(base, 0.0, 1.0)
     detail = luma - base
 
     # S-curve with strict black/white point anchoring

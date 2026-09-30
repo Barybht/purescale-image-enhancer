@@ -403,6 +403,30 @@ class TestPureScale4ToneMapping(unittest.TestCase):
         self.assertTrue(np.array_equal(img, out))
 
 
+class TestPureScale4Contrast(unittest.TestCase):
+    """Tests BIMEF fusion numerical safety on range extremes."""
+
+    def test_bimef_no_nan_on_extremes(self):
+        import warnings
+        from purescale.dsp.contrast import bimef_exposure_fusion
+
+        step = np.full((64, 64, 3), 128, dtype=np.uint8)
+        step[:, 32:] = 255
+        step[:16, :16] = 0
+        for img in (
+            np.full((64, 64, 3), 255, dtype=np.uint8),
+            np.full((64, 64, 3), 0, dtype=np.uint8),
+            step,
+        ):
+            with warnings.catch_warnings():
+                # Blur rounding past [0, 1] used to NaN the S-curve powers.
+                warnings.simplefilter("error", RuntimeWarning)
+                out = bimef_exposure_fusion(img, contrast_boost=1.8)
+            self.assertEqual(out.shape, img.shape)
+            self.assertEqual(out.dtype, np.uint8)
+            self.assertTrue(np.all(np.isfinite(out.astype(np.float32))))
+
+
 class TestPureScale4Pipeline(unittest.TestCase):
     """Test suite for end-to-end PureScale 4.0 Pipeline determinism."""
 
