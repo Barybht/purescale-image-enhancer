@@ -20,12 +20,19 @@ def edge_adaptive_upsample(img: np.ndarray, scale: float = 2.0) -> np.ndarray:
     # Base high-fidelity Lanczos-4 sinc reconstruction
     lanczos = cv2.resize(img, (target_w, target_h), interpolation=cv2.INTER_LANCZOS4)
 
-    # Compute directional edge orientation on luminance
+    # Compute directional edge orientation on luminance.
+    # Deterministic derivatives: OpenCV's threaded Sobel/magnitude can yield
+    # call-order-dependent float results on some builds (observed as
+    # intermittent 1-LSB pipeline flips on ubuntu CI runners), which the
+    # blend below amplifies into bitwise-nondeterministic output. Plain
+    # NumPy derivatives are bit-stable across calls and match the cv2 3x3
+    # Sobel definition (unit scale, BORDER_REFLECT_101 padding).
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).astype(np.float32)
-    gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
-    gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+    p = np.pad(gray, 1, mode="reflect")
+    gx = (p[1:-1, 2:] - p[1:-1, :-2]) + 2.0 * (p[2:, 2:] - p[2:, :-2]) + (p[:-2, 2:] - p[:-2, :-2])
+    gy = (p[2:, :-2] - p[:-2, :-2]) + 2.0 * (p[2:, 1:-1] - p[:-2, 1:-1]) + (p[2:, 2:] - p[:-2, 2:])
 
-    mag = cv2.magnitude(gx, gy)
+    mag = np.sqrt(gx * gx + gy * gy)
     mag_up = cv2.resize(mag, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
 
     # Edge coherence weight (0 in flat areas, 1 on strong directional edges)
