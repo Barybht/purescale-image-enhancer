@@ -2,19 +2,29 @@
 
 import hashlib
 import os
+import time
 import urllib.request
 import urllib.error
 import http.client
+import uuid
 from typing import Dict, List, Optional, Callable
 
 DEFAULT_MODELS_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "models")
 )
 
+# Download-hardening knobs.
+_DOWNLOAD_RETRIES = 3
+_LOCK_POLL_INTERVAL_S = 0.05
+_LOCK_TIMEOUT_S = 120.0      # wait this long for a concurrent downloader
+_LOCK_STALE_S = 600.0        # steal locks left by dead processes after 10 min
+
 # Registry schema per entry:
 #   filename   - local cache file name under models/
-#   url        - download source (only add URLs verified to exist)
-#   size_bytes - expected download size (sanity check)
+#   url        - download source, pinned to an immutable upstream revision
+#                (a mutable /main/ URL can silently change bytes and leave the
+#                pinned SHA256 permanently unverifiable)
+#   size_bytes - expected download size (early corruption detection)
 #   sha256     - hex digest verified against the reference file, or None
 #   scale      - native super-resolution factor (1 = no scaling, e.g. detectors)
 #   task       - "super-resolution" | "face-detection" | "face-restoration"
@@ -24,7 +34,7 @@ DEFAULT_MODELS_DIR = os.path.abspath(
 MODEL_REGISTRY = {
     "realesr-general-x4v3": {
         "filename": "realesr-general-x4v3.onnx",
-        "url": "https://huggingface.co/Heliosoph/realesrgan-onnx/resolve/main/realesr-general-x4v3.onnx",
+        "url": "https://huggingface.co/Heliosoph/realesrgan-onnx/resolve/488e5dda07333179f229a6205d92135eea4c25e9/realesr-general-x4v3.onnx",
         "size_bytes": 4871181,
         "sha256": "09b757accd747d7e423c1d352b3e8f23e77cc5742d04bae958d4eb8082b76fa4",
         "scale": 4,
@@ -35,7 +45,7 @@ MODEL_REGISTRY = {
     },
     "realesr-animevideov3-x4": {
         "filename": "realesr-animevideov3-x4.onnx",
-        "url": "https://huggingface.co/xiaojiaenen/lingtuan-sr-models/resolve/main/realesr-animevideov3-x4.onnx",
+        "url": "https://huggingface.co/xiaojiaenen/lingtuan-sr-models/resolve/29adb237e42934ce2cc87a1a4887f4950cb8ab55/realesr-animevideov3-x4.onnx",
         "size_bytes": 2496535,
         "sha256": "14114520123405712c92c2b266a49e906f03b595335e53e3604cdc03c5a408e4",
         "scale": 4,
@@ -46,7 +56,7 @@ MODEL_REGISTRY = {
     },
     "yunet-face": {
         "filename": "face_detection_yunet_2023mar.onnx",
-        "url": "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+        "url": "https://github.com/opencv/opencv_zoo/raw/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
         "size_bytes": 232589,
         "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
         "scale": 1,
@@ -63,14 +73,75 @@ class ModelManager:
     def __init__(self, models_dir: Optional[str] = None):
         self.models_dir = os.path.abspath(models_dir or DEFAULT_MODELS_DIR)
         os.makedirs(self.models_dir, exist_ok=True)
+        self._sweep_stale_temp(self.models_dir)
+
+    @staticmethod
+    def _sweep_stale_temp(models_dir: str) -> None:
+        """Removes litter from hard-killed downloads: ``.download`` temp files
+        and ``.lock`` files older than the stale-lock window. Fresh artifacts
+        from another live process are never touched."""
+        now = time.time()
+        try:
+            names = os.listdir(models_dir)
+        except OSError:
+            return
+        for name in names:
+            if name.endswith(".download") or name.endswith(".lock"):
+                path = os.path.join(models_dir, name)
+                try:
+                    if now - os.path.getmtime(path) > _LOCK_STALE_S:
+                        os.remove(path)
+                except OSError:
+                    pass
+
+    @staticmethod
+    def _lock_is_stale(lock_path: str) -> bool:
+        try:
+            return (time.time() - os.path.getmtime(lock_path)) > _LOCK_STALE_S
+        except OSError:
+            return True
+
+    def _acquire_lock(self, lock_path: str) -> bool:
+        """Advisory cross-process lock via O_EXCL creation.
+
+        Losers poll until the winner finishes (or the timeout elapses). A lock
+        left by a dead process is stolen after ``_LOCK_STALE_S``.
+        """
+        deadline = time.monotonic() + _LOCK_TIMEOUT_S
+        while True:
+            try:
+                fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode())
+                os.close(fd)
+                return True
+            except FileExistsError:
+                if self._lock_is_stale(lock_path):
+                    try:
+                        os.remove(lock_path)
+                        continue  # stolen: retry acquisition immediately
+                    except OSError:
+                        pass
+                if time.monotonic() >= deadline:
+                    return False
+                time.sleep(_LOCK_POLL_INTERVAL_S)
+            except OSError:
+                # FS forbids O_EXCL here: degrade to the old unlocked behavior.
+                return True
 
     def get_model_path(self, model_key: str, auto_download: bool = True, progress_callback: Optional[Callable[[int, int], None]] = None) -> Optional[str]:
-        """Resolves local model path, downloading if necessary."""
+        """Resolves local model path, downloading if necessary.
+
+        Download hardening: unique per-attempt temp file (no cross-process
+        ``.download`` collisions), an advisory lock so concurrent downloaders
+        cannot corrupt each other, SHA256 verified BEFORE the atomic rename
+        into the cache, and ``_DOWNLOAD_RETRIES`` attempts with backoff.
+        """
         if model_key not in MODEL_REGISTRY:
             raise ValueError(f"Unknown model key: {model_key}. Available: {list(MODEL_REGISTRY.keys())}")
 
         info = MODEL_REGISTRY[model_key]
         dest_path = os.path.join(self.models_dir, info["filename"])
+        lock_path = dest_path + ".lock"
 
         if os.path.exists(dest_path) and os.path.getsize(dest_path) > 10000:
             # Corrupt/stale cache (hash mismatch) is treated as missing so it
@@ -86,49 +157,98 @@ class ModelManager:
         if not auto_download:
             return None
 
-        url = info["url"]
-        temp_path = dest_path + ".download"
-
-        try:
-            req = urllib.request.Request(
-                url,
-                headers={"User-Agent": "PureScale/4.0"}
+        if not self._acquire_lock(lock_path):
+            # Another process downloaded (or is downloading) the model.
+            if os.path.exists(dest_path) and os.path.getsize(dest_path) > 10000:
+                return dest_path
+            raise RuntimeError(
+                f"Timed out waiting for a concurrent download of '{model_key}' "
+                f"({lock_path}); delete the lock file if no other process is running."
             )
-            with urllib.request.urlopen(req, timeout=30) as resp, open(temp_path, "wb") as out_file:
-                total_size = int(resp.headers.get("Content-Length", info["size_bytes"]))
-                downloaded = 0
-                chunk_size = 65536
+        try:
+            return self._download_and_verify(model_key, info, dest_path, progress_callback)
+        finally:
+            try:
+                os.remove(lock_path)
+            except OSError:
+                pass
+
+    def _download_and_verify(
+        self,
+        model_key: str,
+        info: Dict[str, object],
+        dest_path: str,
+        progress_callback: Optional[Callable[[int, int], None]],
+    ) -> str:
+        """Downloads to a unique temp file, verifies size + SHA256, then atomically moves it into the cache."""
+        url = str(info["url"])
+        expected_size = int(info["size_bytes"])
+        last_err: Exception = None  # type: ignore[assignment]
+
+        for attempt in range(1, _DOWNLOAD_RETRIES + 1):
+            temp_path = f"{dest_path}.{os.getpid()}.{uuid.uuid4().hex[:12]}.download"
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "PureScale/4.0"})
+                with urllib.request.urlopen(req, timeout=30) as resp, open(temp_path, "wb") as out_file:
+                    try:
+                        total_size = int(resp.headers.get("Content-Length", expected_size))
+                    except (TypeError, ValueError):
+                        total_size = expected_size
+                    downloaded = 0
+                    chunk_size = 65536
+                    while True:
+                        chunk = resp.read(chunk_size)
+                        if not chunk:
+                            break
+                        out_file.write(chunk)
+                        downloaded += len(chunk)
+                        if progress_callback:
+                            # Callback bugs must surface as themselves, not as
+                            # misleading "download failed" errors.
+                            progress_callback(downloaded, total_size)
+
+                if downloaded != expected_size:
+                    raise RuntimeError(
+                        f"size mismatch: got {downloaded} bytes, expected {expected_size}"
+                    )
+
+                # Verify BEFORE the cache sees the file: a corrupt payload must
+                # never briefly become the canonical entry (the old code renamed
+                # first and verified after).
+                if info.get("sha256") and not self._verify_file(temp_path, str(info["sha256"])):
+                    raise RuntimeError(f"SHA256 mismatch; expected {info['sha256']}")
+
+                os.replace(temp_path, dest_path)  # atomic on the same volume
+                return dest_path
+
+            except (urllib.error.URLError, http.client.HTTPException, OSError, TimeoutError, RuntimeError) as err:
+                last_err = err
+                if os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except OSError:
+                        pass
+                if attempt < _DOWNLOAD_RETRIES:
+                    time.sleep(min(30.0, 2.0 ** attempt))  # 2 s, 4 s backoff
+
+        raise RuntimeError(
+            f"Failed to download model '{model_key}' from {url} "
+            f"after {_DOWNLOAD_RETRIES} attempts: {last_err}"
+        ) from last_err
+
+    @staticmethod
+    def _verify_file(path: str, expected: str) -> bool:
+        digest = hashlib.sha256()
+        try:
+            with open(path, "rb") as fp:
                 while True:
-                    chunk = resp.read(chunk_size)
+                    chunk = fp.read(1 << 20)
                     if not chunk:
                         break
-                    out_file.write(chunk)
-                    downloaded += len(chunk)
-                    if progress_callback:
-                        progress_callback(downloaded, total_size)
-
-            if os.path.exists(dest_path):
-                os.remove(dest_path)
-            os.rename(temp_path, dest_path)
-
-            if info.get("sha256") and not self.verify_model(model_key):
-                try:
-                    os.remove(dest_path)
-                except OSError:
-                    pass
-                raise RuntimeError(
-                    f"Downloaded model '{model_key}' failed SHA256 integrity check; "
-                    f"expected {info['sha256']}"
-                )
-            return dest_path
-
-        except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError, TimeoutError) as err:
-            if os.path.exists(temp_path):
-                try:
-                    os.remove(temp_path)
-                except OSError:
-                    pass
-            raise RuntimeError(f"Failed to download model '{model_key}' from {url}: {err}") from err
+                    digest.update(chunk)
+        except OSError:
+            return False
+        return digest.hexdigest() == expected
 
     def verify_model(self, model_key: str) -> bool:
         """Verifies a cached model file against its registry SHA256.
@@ -144,14 +264,7 @@ class ModelManager:
         dest_path = os.path.join(self.models_dir, info["filename"])
         if not os.path.exists(dest_path):
             return False
-        digest = hashlib.sha256()
-        with open(dest_path, "rb") as fp:
-            while True:
-                chunk = fp.read(1 << 20)
-                if not chunk:
-                    break
-                digest.update(chunk)
-        return digest.hexdigest() == expected
+        return self._verify_file(dest_path, str(expected))
 
     def list_models(self) -> List[Dict[str, object]]:
         """Returns registry status: key, task, scale, cached and verified flags."""

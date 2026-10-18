@@ -37,8 +37,11 @@ def tile_process(
 ) -> np.ndarray:
     """
     Processes image in overlapping spatial tiles with continuous raised-cosine blending.
-    Guarantees bounded RAM usage (<300 MB) and completely seamless boundaries
-    regardless of input resolution (up to 8K and beyond).
+    Provides completely seamless boundaries regardless of input resolution (up to 8K
+    and beyond). Memory: per-tile temporaries are small, but the output accumulators
+    are full-resolution (~16 bytes per output pixel across float32 color + weight
+    planes) — ~533 MB at 1080p->4x — so bound usage with the pipeline's megapixel
+    guard rather than a fixed constant.
 
     Supports 2D grayscale, 3-channel BGR, and 4-channel BGRA/RGBA images.
 
