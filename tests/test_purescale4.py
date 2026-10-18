@@ -550,6 +550,80 @@ class TestPureScale4Pipeline(unittest.TestCase):
         self.assertEqual(diff, 0, "PureDSP must be 100% bitwise deterministic")
         self.assertIsNotNone(res1.diagnostics)
 
+    def test_debug_stage_determinism(self):
+        # TEMPORARY CI DIAGNOSTIC for the ubuntu 3.11 nondeterminism (diff=3)
+        # observed on PR #3 — REMOVE BEFORE MERGE. Runs every pipeline stage
+        # twice on identical input; the failure log names the culprit stage.
+        import cv2
+
+        from purescale.dsp.color import bradford_cat16_white_balance, oklab_vibrance
+        from purescale.dsp.contrast import bimef_exposure_fusion, contrast_adaptive_sharpen
+        from purescale.dsp.dehaze import atmospheric_dehaze
+        from purescale.dsp.diagnostics import diagnose_image
+        from purescale.dsp.filters import side_window_filter
+        from purescale.dsp.pyramid import multiscale_laplacian_filter
+        from purescale.dsp.semantic import (
+            compute_spatial_guidance_maps,
+            extract_semantic_masks,
+        )
+        from purescale.dsp.tone import local_tone_mapping
+        from purescale.dsp.upsample import edge_adaptive_upsample
+
+        np.random.seed(99)
+        img = np.random.randint(40, 220, (100, 100, 3), dtype=np.uint8)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+        def run_full():
+            return PureScalePipeline().enhance(
+                img,
+                config=PipelineConfig(
+                    mode=ProcessingMode.PURE_DSP, scale=1.5, enable_diagnostics=True,
+                    enable_dehaze=True, dehaze_strength=0.3,
+                    pyramid_micro_texture=1.2, pyramid_structure_boost=1.1,
+                ),
+            ).image
+
+        first = run_full()
+        diffs = []
+        for i in range(2):
+            again = run_full()
+            if not np.array_equal(first, again):
+                ys, xs, ch = np.where(first != again)
+                diffs.append(f"full_pipeline run {i + 2}: {len(ys)} px differ, "
+                             f"first at y={ys[0]} x={xs[0]} ch={ch[0]} "
+                             f"({first[ys[0], xs[0], ch[0]]} vs {again[ys[0], xs[0], ch[0]]})")
+        for d in diffs:
+            print("[DETERMINISM]", d)
+
+        masks_fn = lambda: tuple(map(np.asarray, vars(extract_semantic_masks(img)).values()))  # noqa: E731
+        probes = [
+            ("semantic_masks", masks_fn),
+            ("guidance_maps", lambda: compute_spatial_guidance_maps(extract_semantic_masks(img), guide=gray)),
+            ("swf_r2", lambda: side_window_filter(img, radius=2, iterations=1, noise_sigma=15.0)),
+            ("dehaze_03", lambda: atmospheric_dehaze(img, strength=0.3)[0]),
+            ("easu_15", lambda: edge_adaptive_upsample(img, scale=1.5)),
+            ("pyramid_12_11", lambda: multiscale_laplacian_filter(img, 1.2, 1.1, 0.0, 0.0)),
+            ("bimef_18", lambda: bimef_exposure_fusion(img, 1.8)),
+            ("cas_11", lambda: contrast_adaptive_sharpen(img, 1.1)),
+            ("tone_default", lambda: local_tone_mapping(img, 0.5, 0.5, 0.5)),
+            ("oklab_110", lambda: oklab_vibrance(img, 1.10)),
+            ("cat16_0", lambda: bradford_cat16_white_balance(img, 0)),
+            ("diagnose", lambda: tuple(diagnose_image(img).to_dict().items())),
+        ]
+        bad = []
+        for name, fn in probes:
+            a, b = fn(), fn()
+            if isinstance(a, np.ndarray):
+                same = np.array_equal(a, b)
+            elif isinstance(a, tuple) and a and isinstance(a[0], np.ndarray):
+                same = all(np.array_equal(x, y) for x, y in zip(a, b))
+            else:
+                same = a == b
+            print(f"[DETERMINISM] {name}: {'ok' if same else 'DIFFERS'}")
+            if not same:
+                bad.append(name)
+        self.assertEqual(bad + diffs, [], f"nondeterministic stages: {bad + diffs}")
+
     def test_config_validation(self):
         with self.assertRaises(ValueError):
             PipelineConfig(scale=0.0)
