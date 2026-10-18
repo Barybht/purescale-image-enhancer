@@ -111,13 +111,20 @@ def estimate_wavelet_noise_mad(img_gray: np.ndarray) -> Tuple[float, str]:
         sigma_noise = median(|HH1 - median(HH1)|) / 0.6745
 
     Args:
-        img_gray: Single-channel uint8 or float32 image [H, W]
+        img_gray: Single-channel uint8 image [H, W] on the 0-255 gray-level
+            scale (the category thresholds below are expressed in gray
+            levels; a [0, 1]-scaled float input would always read "Clean").
 
     Returns:
         Tuple of (sigma_estimate, category_string)
     """
     gray = img_gray.astype(np.float32)
     h, w = gray.shape[:2]
+    if h < 2 or w < 2:
+        # Too small for a 2x2 Haar decomposition: median over an empty HH1
+        # would be NaN and classify as "Heavy" (the chroma sibling guards
+        # the same way).
+        return 0.0, "Clean"
 
     # Crop to even dimensions for exact 2x2 Haar decomposition
     h_even = h - (h % 2)
@@ -225,7 +232,9 @@ def estimate_optical_blur(img_gray: np.ndarray) -> Tuple[float, str]:
     Values range from 0.0 (pin-sharp edge transitions) to 1.0 (severe optical defocus).
 
     Args:
-        img_gray: Single-channel uint8 or float32 image [H, W]
+        img_gray: Single-channel uint8 image [H, W] on the 0-255 gray-level
+            scale (the variance threshold below assumes that scale; a
+            [0, 1]-scaled float input would always read "Blurred").
 
     Returns:
         Tuple of (blur_score, category_string)

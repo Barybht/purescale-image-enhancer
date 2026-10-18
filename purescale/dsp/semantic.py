@@ -10,6 +10,8 @@ from typing import Dict, Optional, Tuple
 import cv2
 import numpy as np
 
+from purescale.dsp.filters import fast_guided_filter
+
 
 @dataclass
 class SemanticMasks:
@@ -20,9 +22,6 @@ class SemanticMasks:
     shadow: np.ndarray       # Soft mask for underexposed deep shadows
     structure: np.ndarray    # Soft mask for high-coherence architectural edges
     breakdown: Dict[str, float]  # Percentage coverage per semantic class
-
-
-from purescale.dsp.filters import fast_guided_filter
 
 
 def extract_semantic_masks(
@@ -42,9 +41,12 @@ def extract_semantic_masks(
     h, w = img_bgr.shape[:2]
     total_pixels = float(h * w)
 
-    # Downsample guide for high-performance segmentation pass
-    proc_w = min(640, w)
-    proc_h = int(round(h * (proc_w / float(w))))
+    # Downsample guide for the high-performance segmentation pass. The cap
+    # applies to the LONG edge: a width-only cap left tall/portrait images
+    # at full cost with degraded mask quality.
+    pscale = min(1.0, 640.0 / float(max(h, w)))
+    proc_w = max(1, int(round(w * pscale)))
+    proc_h = max(1, int(round(h * pscale)))
     small = cv2.resize(img_bgr, (proc_w, proc_h), interpolation=cv2.INTER_AREA)
 
     # Color spaces
@@ -172,7 +174,10 @@ def compute_spatial_guidance_maps(
     denoise_map = np.clip(denoise_map, 0.40, 1.85)
 
     if guide is not None:
-        detail_map = fast_guided_filter(guide, detail_map, radius=6, eps=1e-3, subsample=2)
-        denoise_map = fast_guided_filter(guide, denoise_map, radius=6, eps=1e-3, subsample=2)
+        # Gain maps legitimately exceed 1.0 (up to ~1.85): "gain" mode keeps
+        # that scale. The default "auto" heuristic would clip the gains to
+        # 1.0 (values <= 1.5) or misread them as [0, 255]-scale input.
+        detail_map = fast_guided_filter(guide, detail_map, radius=6, eps=1e-3, subsample=2, value_range="gain")
+        denoise_map = fast_guided_filter(guide, denoise_map, radius=6, eps=1e-3, subsample=2, value_range="gain")
 
     return detail_map, denoise_map

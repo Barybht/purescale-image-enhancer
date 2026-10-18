@@ -61,7 +61,11 @@ def local_tone_mapping(
         base = fast_guided_filter(luma, luma, radius=16, eps=1e-3, subsample=2)
 
     base = np.clip(base, 1e-4, 1.0)
-    detail = (luma + 1e-4) / (base + 1e-4)
+    # Ratio ceiling: where the guided base underestimates near-black texture
+    # (base -> 1e-4 floor), the raw ratio explodes (~20x) and the reconstruction
+    # term amplifies shadow noise up to full scale. 8x is far above any
+    # legitimate detail ratio while leaving normal pixels (0.5-2.0) untouched.
+    detail = np.clip((luma + 1e-4) / (base + 1e-4), 1e-2, 8.0)
 
     # Asymmetric adaptive tone compression curves on base layer:
     # 1. Smooth toe expansion for shadows below 0.40

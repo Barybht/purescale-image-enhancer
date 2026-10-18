@@ -5,6 +5,7 @@ Multi-Cue Semantic Region Guidance, Multiscale Local Laplacian Pyramids,
 and Hybrid Neural Edge Synthesis.
 """
 
+import copy
 import time
 from typing import Callable, Dict, Optional, Tuple
 import cv2
@@ -90,8 +91,8 @@ class PureScalePipeline:
     # -------------------------------------------------------------
     @staticmethod
     def _swf_clean_skip(diag_result: Optional[DiagnosticsResult], cfg: "PipelineConfig") -> bool:
-        """Clean-image skip: diagnosed sigma < 2.0 with default strength
-        bypasses SWF. Matches auto_tune Clean -> enable_denoise=False."""
+        """Clean-image skip: diagnosed sigma < 2.0 with strength <= 35
+        bypasses SWF (the library default of 40 still runs)."""
         return (
             diag_result is not None
             and diag_result.noise_sigma < 2.0
@@ -338,7 +339,12 @@ class PureScalePipeline:
         Returns:
             ProcessingResult containing enhanced image, diagnostics, and telemetry
         """
-        cfg = PipelineConfig(**(config or self.config).to_dict())
+        # Deep-copy (not the historical to_dict() round-trip): preserves enum
+        # identity and the explicit-field tracking that style-profile
+        # precedence depends on, and avoids rebuilding the config per image.
+        src_cfg = config if config is not None else self.config
+        cfg = copy.deepcopy(src_cfg)
+        cfg.validate()
         t_start = time.perf_counter()
         stage_latencies = {}
         faces_detected = 0
