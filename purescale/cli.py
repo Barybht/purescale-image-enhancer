@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -31,6 +32,28 @@ def load_image_with_alpha(path: str, return_meta: bool = False):
     """Loads image, handles EXIF orientation tag 274, and separates alpha channel."""
     pil_img = Image.open(path)
 
+    # Normalize exotic encodings BEFORE the EXIF transpose so it operates on a
+    # plain raster. CMYK/YCbCr must be converted (their 4th channel must not
+    # be misread as alpha); palette images resolve through their palette;
+    # >8-bit depths are rejected with a clear message instead of silently
+    # clamping to a near-black image downstream.
+    mode = pil_img.mode
+    if mode in ("CMYK", "YCbCr", "HSV", "LAB"):
+        pil_img = pil_img.convert("RGB")
+    elif mode in ("P", "PA"):
+        pil_img = pil_img.convert("RGBA" if "transparency" in pil_img.info else "RGB")
+    elif mode in ("LA", "RGBa"):
+        pil_img = pil_img.convert("RGBA")
+    elif mode == "RGBX":
+        pil_img = pil_img.convert("RGB")
+    elif mode == "1":
+        pil_img = pil_img.convert("L")
+    elif mode in ("I", "I;16", "I;16B", "I;16L", "I;16N", "F"):
+        raise ValueError(
+            f"Unsupported bit depth: image mode '{mode}' in {path}. "
+            "PureScale requires 8-bit images; convert to uint8 (gray or RGB) first."
+        )
+
     # exif_transpose() rotates the pixels upright and neutralizes the
     # Orientation tag on the in-memory image. Capturing the EXIF/ICC blocks
     # AFTER the transpose (not before) preserves camera metadata while
@@ -40,6 +63,14 @@ def load_image_with_alpha(path: str, return_meta: bool = False):
     exif_bytes = pil_img.info.get("exif")
     icc_profile = pil_img.info.get("icc_profile")
     arr = np.array(pil_img)
+
+    if arr.size == 0:
+        raise ValueError(f"Image is empty (0 pixels): {path}")
+    if arr.ndim not in (2, 3) or (arr.ndim == 3 and arr.shape[2] not in (1, 3, 4)):
+        raise ValueError(
+            f"Unsupported channel layout {arr.shape} for {path}: "
+            "expected gray [H, W] or RGB(A) [H, W, 3/4]."
+        )
 
     alpha = None
     if arr.ndim == 2:
@@ -62,8 +93,14 @@ def save_image_with_alpha(
     format_name: str,
     exif: Optional[bytes] = None,
     icc_profile: Optional[bytes] = None,
+    preserve_gray: bool = False,
 ) -> None:
-    """Saves enhanced image in specified format with alpha, EXIF, and ICC profile if present."""
+    """Saves enhanced image in specified format with alpha, EXIF, and ICC profile if present.
+
+    ``preserve_gray``: when True (and no alpha is supplied), writes a
+    single-channel grayscale file instead of expanding a gray-sourced image
+    to 3 channels — so grayscale inputs keep their luminance-only encoding.
+    """
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     fmt = format_name.upper()
 
@@ -71,7 +108,18 @@ def save_image_with_alpha(
         rgba = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGBA)
         rgba[:, :, 3] = alpha
         pil_out = Image.fromarray(rgba)
+    elif preserve_gray and alpha is None:
+        # Gray-sourced results are already 2-D (the pipeline converts back);
+        # a 3-channel BGR carrying luminance-only content is collapsed here.
+        gray = bgr if bgr.ndim == 2 else cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+        pil_out = Image.fromarray(gray)
     else:
+        if alpha is not None:
+            print(
+                "[WARNING] Alpha channel dropped: JPEG does not support transparency. "
+                "Use --format PNG or WebP to preserve alpha.",
+                file=sys.stderr,
+            )
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         pil_out = Image.fromarray(rgb)
 
@@ -84,7 +132,7 @@ def save_image_with_alpha(
     if fmt == "PNG":
         pil_out.save(out_path, format="PNG", compress_level=6, **save_kwargs)
     elif fmt in ("JPEG", "JPG"):
-        if pil_out.mode != "RGB":
+        if pil_out.mode not in ("RGB", "L"):
             pil_out = pil_out.convert("RGB")
         pil_out.save(out_path, format="JPEG", quality=95, subsampling=0, **save_kwargs)
     elif fmt == "WEBP":
@@ -108,7 +156,10 @@ def process_file(pipeline: PureScalePipeline, cfg: PipelineConfig, in_path: str,
         res = pipeline.enhance(bgr, config=cfg, alpha=alpha)
 
         out_h, out_w = res.image.shape[:2]
-        save_image_with_alpha(res.image, res.alpha, out_path, cfg.output_format, exif=exif, icc_profile=icc)
+        save_image_with_alpha(
+            res.image, res.alpha, out_path, cfg.output_format,
+            exif=exif, icc_profile=icc, preserve_gray=res.is_grayscale,
+        )
 
         info: Dict[str, Any] = {
             "input": in_path,
@@ -159,6 +210,22 @@ def process_file(pipeline: PureScalePipeline, cfg: PipelineConfig, in_path: str,
         return None
 
 
+def _json_safe(obj: Any) -> Any:
+    """Converts non-finite floats to None so json.dumps output is RFC 8259 valid.
+
+    ``json.dumps`` emits bare ``Infinity`` for float('inf') (invalid JSON per
+    RFC 8259); strict parsers reject it. Identical-image comparisons report
+    ``inf`` PSNR, which becomes ``null`` here.
+    """
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
+
+
 def main_compare(argv: List[str]) -> int:
     """Compares two images with PSNR/SSIM. Usage: compare BEFORE AFTER [--json]."""
     parser = argparse.ArgumentParser(
@@ -183,11 +250,126 @@ def main_compare(argv: List[str]) -> int:
         return 1
 
     if parsed.json:
-        print(json.dumps({"before": parsed.before, "after": parsed.after, **metrics}))
+        print(json.dumps(_json_safe({"before": parsed.before, "after": parsed.after, **metrics})))
     else:
         print(f"PSNR: {metrics['psnr_db']:.2f} dB")
         print(f"SSIM: {metrics['ssim']:.4f}")
     return 0
+
+
+def _apply_flags(cfg: PipelineConfig, parsed: argparse.Namespace) -> None:
+    """Applies explicit CLI flags onto cfg (None = keep preset/default value).
+
+    Extracted from ``main`` so flag semantics are unit-testable. Also emits
+    the neural-mode DSP-only warning: Neural AI runs super-resolution +
+    pyramid + portrait only, so stages between them (SWF/CAS/BIMEF/tone/
+    color/exposure) would silently ignore their flags.
+    """
+    cfg.mode = ProcessingMode(parsed.mode)
+    cfg.device = DeviceTarget(parsed.device)
+    if parsed.style is not None:
+        cfg.sr_style = parsed.style
+    if parsed.style_profile is not None:
+        cfg.style_profile = parsed.style_profile
+    cfg.auto_tune = parsed.auto
+    if parsed.auto:
+        # Auto-tuning needs diagnostics to compute recommendations.
+        cfg.enable_diagnostics = True
+        # One-click autonomy includes content style routing.
+        cfg.auto_style = True
+    if parsed.auto_style:
+        cfg.auto_style = True
+        cfg.enable_diagnostics = True
+    if parsed.no_diagnostics:
+        # Explicit opt-out wins: diagnostics are also required by auto-tune
+        # and auto-style, so those dependent features are disabled too.
+        cfg.enable_diagnostics = False
+        cfg.auto_tune = False
+        cfg.auto_style = False
+    if parsed.dehaze is not None:
+        cfg.enable_dehaze = parsed.dehaze > 0.0
+        if parsed.dehaze > 0.0:
+            # Only set the strength when dehazing is enabled; a disabled
+            # flag must not clobber a preset's tuned strength with 0.50.
+            cfg.dehaze_strength = parsed.dehaze
+    if parsed.no_pyramid:
+        cfg.enable_pyramid = False
+    if parsed.pyramid_detail is not None:
+        cfg.pyramid_micro_texture = parsed.pyramid_detail
+    if parsed.pyramid_structure is not None:
+        cfg.pyramid_structure_boost = parsed.pyramid_structure
+    if parsed.pyramid_dynamic_range is not None:
+        cfg.pyramid_dynamic_range = parsed.pyramid_dynamic_range
+    if parsed.no_semantic:
+        cfg.enable_semantic_guidance = False
+    if parsed.scale is not None:
+        cfg.scale = parsed.scale
+    if parsed.sharpen is not None:
+        cfg.sharpen_strength = parsed.sharpen
+    if parsed.no_denoise:
+        cfg.enable_denoise = False
+    if parsed.denoise_intensity is not None:
+        cfg.denoise_intensity = parsed.denoise_intensity
+    if parsed.no_contrast:
+        cfg.enable_contrast = False
+    if parsed.contrast_boost is not None:
+        cfg.contrast_boost = parsed.contrast_boost
+    if parsed.local_tone is not None:
+        cfg.enable_local_tone = parsed.local_tone
+    if parsed.tone_strength is not None:
+        cfg.local_tone_strength = parsed.tone_strength
+    if parsed.highlight_recovery is not None:
+        cfg.highlight_recovery = parsed.highlight_recovery
+    if parsed.shadow_boost is not None:
+        cfg.shadow_boost = parsed.shadow_boost
+    if parsed.brightness is not None:
+        cfg.brightness_shift = parsed.brightness
+    if parsed.vibrance is not None:
+        cfg.vibrance_boost = parsed.vibrance
+    if parsed.temperature is not None:
+        cfg.color_temperature = parsed.temperature
+    if parsed.depixel is not None:
+        cfg.depixel_strength = parsed.depixel
+    if parsed.deblur is not None:
+        cfg.deblur_strength = parsed.deblur
+    if parsed.portrait_smooth is not None:
+        cfg.portrait_smooth = parsed.portrait_smooth
+    if parsed.eye_clarity is not None:
+        cfg.eye_clarity = parsed.eye_clarity
+    if parsed.tile_size is not None:
+        cfg.tile_size = parsed.tile_size
+    if parsed.tile_overlap is not None:
+        cfg.tile_overlap = parsed.tile_overlap
+    if parsed.fast_2x is not None:
+        cfg.enable_fast_2x = parsed.fast_2x
+    if parsed.max_megapixels is not None:
+        cfg.max_megapixels = parsed.max_megapixels
+    cfg.output_format = parsed.format
+
+    if cfg.mode == ProcessingMode.NEURAL_AI:
+        checks = (
+            (parsed.sharpen is not None, "--sharpen"),
+            (parsed.denoise_intensity is not None, "--denoise-intensity"),
+            (bool(parsed.no_denoise), "--no-denoise"),
+            (bool(parsed.no_contrast), "--no-contrast"),
+            (parsed.contrast_boost is not None, "--contrast-boost"),
+            (parsed.local_tone is not None, "--local-tone/--no-local-tone"),
+            (parsed.tone_strength is not None, "--tone-strength"),
+            (parsed.highlight_recovery is not None, "--highlight-recovery"),
+            (parsed.shadow_boost is not None, "--shadow-boost"),
+            (parsed.brightness is not None, "--brightness"),
+            (parsed.vibrance is not None, "--vibrance"),
+            (parsed.temperature is not None, "--temperature"),
+            (parsed.pyramid_dynamic_range is not None, "--pyramid-dynamic-range"),
+        )
+        ignored = [flag for present, flag in checks if present]
+        if ignored:
+            print(
+                "[WARNING] Neural AI mode runs super-resolution + pyramid + portrait "
+                f"only; ignored DSP-only flags: {', '.join(ignored)}. "
+                "Use --mode hybrid to combine neural super-resolution with these stages.",
+                file=sys.stderr,
+            )
 
 
 def main(args: List[str] = None) -> int:
@@ -204,9 +386,10 @@ def main(args: List[str] = None) -> int:
     parser.add_argument("--list-devices", action="store_true", help="List detected accelerators and model cache status, then exit")
 
     # Autonomous Diagnostics
-    parser.add_argument("--auto", action="store_true", help="Enable autonomous diagnostic auto-tuning (implies diagnostics + style auto-detect)")
+    parser.add_argument("--auto", action="store_true", help="Enable autonomous diagnostic auto-tuning (implies diagnostics + style auto-detect; auto-tuned values override explicit tuning flags)")
     parser.add_argument("--auto-style", action="store_true", help="Auto-detect content style (photo/anime/manga) and re-route weights/profile")
     parser.add_argument("--diagnostics", action="store_true", help="Print signal diagnostics table without processing")
+    parser.add_argument("--no-diagnostics", action="store_true", help="Disable the diagnostics stage; auto-tune and auto-style depend on it and are disabled too (also implied by --preset fast)")
 
     # Mode & Hardware Target
     parser.add_argument(
@@ -360,82 +543,14 @@ def main(args: List[str] = None) -> int:
 
     # Build Configuration: preset first, explicit flags win (None = keep preset).
     preset_name = "fast" if parsed.fast else parsed.preset
+    if parsed.fast and parsed.preset and parsed.preset != "fast":
+        print(f"[WARNING] --fast overrides --preset {parsed.preset}.", file=sys.stderr)
     cfg = PipelineConfig()
     if preset_name:
         cfg = get_preset_config(preset_name, cfg)
 
     # Apply Explicit Flags (only when the user passed them)
-    cfg.mode = ProcessingMode(parsed.mode)
-    cfg.device = DeviceTarget(parsed.device)
-    if parsed.style is not None:
-        cfg.sr_style = parsed.style
-    if parsed.style_profile is not None:
-        cfg.style_profile = parsed.style_profile
-    cfg.auto_tune = parsed.auto
-    if parsed.auto:
-        # Auto-tuning needs diagnostics to compute recommendations.
-        cfg.enable_diagnostics = True
-        # One-click autonomy includes content style routing.
-        cfg.auto_style = True
-    if parsed.auto_style:
-        cfg.auto_style = True
-        cfg.enable_diagnostics = True
-    if parsed.dehaze is not None:
-        cfg.enable_dehaze = parsed.dehaze > 0.0
-        cfg.dehaze_strength = parsed.dehaze if parsed.dehaze > 0.0 else 0.50
-    if parsed.no_pyramid:
-        cfg.enable_pyramid = False
-    if parsed.pyramid_detail is not None:
-        cfg.pyramid_micro_texture = parsed.pyramid_detail
-    if parsed.pyramid_structure is not None:
-        cfg.pyramid_structure_boost = parsed.pyramid_structure
-    if parsed.pyramid_dynamic_range is not None:
-        cfg.pyramid_dynamic_range = parsed.pyramid_dynamic_range
-    if parsed.no_semantic:
-        cfg.enable_semantic_guidance = False
-    if parsed.scale is not None:
-        cfg.scale = parsed.scale
-    if parsed.sharpen is not None:
-        cfg.sharpen_strength = parsed.sharpen
-    if parsed.no_denoise:
-        cfg.enable_denoise = False
-    if parsed.denoise_intensity is not None:
-        cfg.denoise_intensity = parsed.denoise_intensity
-    if parsed.no_contrast:
-        cfg.enable_contrast = False
-    if parsed.contrast_boost is not None:
-        cfg.contrast_boost = parsed.contrast_boost
-    if parsed.local_tone is not None:
-        cfg.enable_local_tone = parsed.local_tone
-    if parsed.tone_strength is not None:
-        cfg.local_tone_strength = parsed.tone_strength
-    if parsed.highlight_recovery is not None:
-        cfg.highlight_recovery = parsed.highlight_recovery
-    if parsed.shadow_boost is not None:
-        cfg.shadow_boost = parsed.shadow_boost
-    if parsed.brightness is not None:
-        cfg.brightness_shift = parsed.brightness
-    if parsed.vibrance is not None:
-        cfg.vibrance_boost = parsed.vibrance
-    if parsed.temperature is not None:
-        cfg.color_temperature = parsed.temperature
-    if parsed.depixel is not None:
-        cfg.depixel_strength = parsed.depixel
-    if parsed.deblur is not None:
-        cfg.deblur_strength = parsed.deblur
-    if parsed.portrait_smooth is not None:
-        cfg.portrait_smooth = parsed.portrait_smooth
-    if parsed.eye_clarity is not None:
-        cfg.eye_clarity = parsed.eye_clarity
-    if parsed.tile_size is not None:
-        cfg.tile_size = parsed.tile_size
-    if parsed.tile_overlap is not None:
-        cfg.tile_overlap = parsed.tile_overlap
-    if parsed.fast_2x is not None:
-        cfg.enable_fast_2x = parsed.fast_2x
-    if parsed.max_megapixels is not None:
-        cfg.max_megapixels = parsed.max_megapixels
-    cfg.output_format = parsed.format
+    _apply_flags(cfg, parsed)
 
     try:
         cfg.validate()
@@ -472,7 +587,7 @@ def main(args: List[str] = None) -> int:
 
         result = process_file(pipeline, cfg, in_path, out_path, quiet=quiet, reference=reference_bgr)
         if parsed.json:
-            print(json.dumps(result if result is not None else {"input": in_path, "error": "failed"}))
+            print(json.dumps(_json_safe(result if result is not None else {"input": in_path, "error": "failed"})))
         return 0 if result is not None else 1
 
     elif os.path.isdir(in_path):
@@ -527,13 +642,13 @@ def main(args: List[str] = None) -> int:
 
         total_batch_time = time.perf_counter() - t_batch_start
         if parsed.json:
-            print(json.dumps({
+            print(json.dumps(_json_safe({
                 "output_dir": out_dir,
                 "succeeded": successes,
                 "failed": failures,
                 "total_time_s": round(total_batch_time, 2),
                 "results": results,
-            }))
+            })))
         else:
             print(f"\n[COMPLETE] Batch finished in {total_batch_time:.2f} s: {successes} succeeded, {failures} failed ({total_batch_time/len(rel_files)*1000:.1f} ms/image average)")
 

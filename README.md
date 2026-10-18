@@ -215,6 +215,7 @@ automatically, filling only parameters still at library defaults
 | `enable_fast_2x` | `--fast-2x` / `--no-fast-2x` | False | Boolean | **2x Neural Fast Path**: Pre-downscales input 0.5x before 4x inference (~4x speedup). |
 | `max_megapixels` | `--max-megapixels` | 40.0 | > 0.0 | **Memory OOM Guard**: Maximum allowed megapixels (input/target) before aborting. |
 | `recursive` | `-r`, `--recursive` | False | Boolean | **Recursive Processing**: Recursively process subdirectories in batch mode. |
+| `no_diagnostics` | `--no-diagnostics` | False | Boolean | **Diagnostics Bypass**: Disables the autonomous diagnostics stage (auto-tune and auto-style depend on it and are disabled too). |
 | `no_pyramid` | `--no-pyramid` | False | Boolean | **Bypass Flag**: Disables Multiscale Local Laplacian Pyramid filtering. |
 | `no_semantic` | `--no-semantic` | False | Boolean | **Bypass Flag**: Disables multi-cue semantic region parsing. |
 | `no_denoise` | `--no-denoise` | False | Boolean | **Bypass Flag**: Disables Side Window Filter (SWF) denoising. |

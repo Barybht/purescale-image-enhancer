@@ -2096,5 +2096,218 @@ class TestPureScale4CliBatch(unittest.TestCase):
             )
 
 
+def _fake_parsed(**overrides) -> "argparse.Namespace":
+    """argparse.Namespace mimicking main()'s parsed args with neutral defaults."""
+    import argparse
+
+    defaults = dict(
+        mode="puredsp", device="auto", style=None, style_profile=None,
+        auto=False, auto_style=False, no_diagnostics=False, dehaze=None,
+        no_pyramid=False, pyramid_detail=None, pyramid_structure=None,
+        pyramid_dynamic_range=None, no_semantic=False, scale=None,
+        sharpen=None, no_denoise=False, denoise_intensity=None,
+        no_contrast=False, contrast_boost=None, local_tone=None,
+        tone_strength=None, highlight_recovery=None, shadow_boost=None,
+        brightness=None, vibrance=None, temperature=None, depixel=None,
+        deblur=None, portrait_smooth=None, eye_clarity=None, tile_size=None,
+        tile_overlap=None, fast_2x=None, max_megapixels=None, format="PNG",
+    )
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
+
+
+class TestPureScale4IoValidation(unittest.TestCase):
+    """Loader mode handling, pipeline input contract, CLI flag semantics, JSON safety."""
+
+    def test_loader_cmyk_jpeg_converted(self):
+        # Regression: a CMYK JPEG's K channel used to be misread as alpha and
+        # CM as BGR (wrong colors, bogus alpha).
+        import tempfile
+
+        from PIL import Image as PILImage
+
+        from purescale.cli import load_image_with_alpha
+
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "cmyk.jpg")
+            PILImage.new("CMYK", (8, 8), (0, 0, 0, 255)).save(src, format="JPEG")
+            bgr, alpha = load_image_with_alpha(src)
+            self.assertIsNone(alpha)
+            self.assertEqual(bgr.shape, (8, 8, 3))
+            self.assertLess(int(bgr.max()), 60)  # K=255 renders as black
+
+    def test_loader_palette_png(self):
+        import tempfile
+
+        from PIL import Image as PILImage
+
+        from purescale.cli import load_image_with_alpha
+
+        with tempfile.TemporaryDirectory() as d:
+            base = PILImage.new("RGB", (8, 8), (10, 20, 30))
+            opaque = os.path.join(d, "pal.png")
+            base.convert("P", palette=PILImage.ADAPTIVE).save(opaque, format="PNG")
+            bgr, alpha = load_image_with_alpha(opaque)
+            self.assertIsNone(alpha)  # raw indices must not masquerade as RGB
+            self.assertEqual(bgr.shape, (8, 8, 3))
+
+            with_alpha = os.path.join(d, "pal_t.png")
+            base.convert("P", palette=PILImage.ADAPTIVE).save(
+                with_alpha, format="PNG", transparency=0
+            )
+            bgr, alpha = load_image_with_alpha(with_alpha)
+            self.assertIsNotNone(alpha)
+
+    def test_loader_rejects_16bit(self):
+        import tempfile
+
+        from purescale.cli import load_image_with_alpha
+
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "deep.png")
+            cv2.imwrite(src, np.full((8, 8), 30000, np.uint16))
+            with self.assertRaises(ValueError) as ctx:
+                load_image_with_alpha(src)
+            self.assertIn("bit depth", str(ctx.exception))
+
+    def test_pipeline_input_contract(self):
+        pipeline = PureScalePipeline()
+        cfg = PipelineConfig(scale=1.0)
+        for bad, needle in (
+            (np.zeros((8, 8, 2), np.uint8), "channels"),
+            (np.zeros((8, 8, 3), np.float32), "uint8"),
+            (np.zeros((8, 8, 3, 3), np.uint8), "dimensions"),
+            (np.zeros((0, 0, 3), np.uint8), "empty"),
+        ):
+            with self.subTest(shape=bad.shape, dtype=bad.dtype):
+                with self.assertRaises(ValueError) as ctx:
+                    pipeline.enhance(bad, config=cfg)
+                self.assertIn(needle, str(ctx.exception))
+
+    def test_mode_device_strings_validated(self):
+        # String values stay accepted (backward compatible with the old
+        # to_dict() round-trip era); unknown values now fail at config time
+        # instead of deep inside the pipeline.
+        self.assertEqual(PipelineConfig(mode="puredsp").mode, ProcessingMode.PURE_DSP)
+        self.assertEqual(PipelineConfig(device="cpu").device, DeviceTarget.CPU)
+        with self.assertRaises(ValueError):
+            PipelineConfig(mode="bogus")
+        with self.assertRaises(ValueError):
+            PipelineConfig(device="bogus")
+
+    def test_dehaze_zero_keeps_preset_strength(self):
+        from purescale.cli import _apply_flags
+        from purescale.config import get_preset_config
+
+        cfg = get_preset_config("landscape")  # ships dehaze_strength 0.60
+        _apply_flags(cfg, _fake_parsed(dehaze=0.0))
+        self.assertFalse(cfg.enable_dehaze)
+        # The disabled flag must not clobber the preset's tuned strength.
+        self.assertEqual(cfg.dehaze_strength, 0.6)
+
+        cfg = get_preset_config("landscape")
+        _apply_flags(cfg, _fake_parsed(dehaze=0.35))
+        self.assertTrue(cfg.enable_dehaze)
+        self.assertEqual(cfg.dehaze_strength, 0.35)
+
+    def test_neural_mode_warns_on_ignored_flags(self):
+        import io
+        from contextlib import redirect_stderr
+
+        from purescale.cli import _apply_flags
+
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            _apply_flags(PipelineConfig(), _fake_parsed(mode="neural", sharpen=2.0))
+        self.assertIn("--sharpen", buf.getvalue())
+        self.assertIn("hybrid", buf.getvalue())
+
+        # PureDSP consumes the same flag without warning.
+        buf = io.StringIO()
+        with redirect_stderr(buf):
+            _apply_flags(PipelineConfig(), _fake_parsed(sharpen=2.0))
+        self.assertNotIn("Neural AI", buf.getvalue())
+
+    def test_no_diagnostics_flag(self):
+        from purescale.cli import _apply_flags
+
+        cfg = PipelineConfig()
+        _apply_flags(cfg, _fake_parsed(no_diagnostics=True))
+        self.assertFalse(cfg.enable_diagnostics)
+
+        # auto-tune and auto-style depend on diagnostics: disabled with it.
+        cfg = PipelineConfig()
+        _apply_flags(cfg, _fake_parsed(auto=True, no_diagnostics=True))
+        self.assertFalse(cfg.enable_diagnostics)
+        self.assertFalse(cfg.auto_tune)
+        self.assertFalse(cfg.auto_style)
+
+    def test_compare_json_rfc_valid(self):
+        # Identical images report infinite PSNR; bare Infinity is invalid
+        # JSON per RFC 8259, so it must serialize as null.
+        import io
+        import json
+        import tempfile
+        from contextlib import redirect_stdout
+
+        from purescale.cli import main
+
+        with tempfile.TemporaryDirectory() as d:
+            a = os.path.join(d, "a.png")
+            b = os.path.join(d, "b.png")
+            cv2.imwrite(a, np.zeros((8, 8, 3), dtype=np.uint8))
+            cv2.imwrite(b, np.zeros((8, 8, 3), dtype=np.uint8))
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                code = main(["compare", a, b, "--json"])
+            self.assertEqual(code, 0)
+            payload = json.loads(buf.getvalue())  # raises on bare Infinity
+            self.assertIsNone(payload["psnr_db"])
+            self.assertGreater(payload["ssim"], 0.99)
+
+    def test_jpeg_alpha_drop_warning(self):
+        import io
+        import tempfile
+        from contextlib import redirect_stderr
+
+        from purescale.cli import save_image_with_alpha
+
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "out.jpg")
+            buf = io.StringIO()
+            with redirect_stderr(buf):
+                save_image_with_alpha(
+                    np.zeros((8, 8, 3), dtype=np.uint8),
+                    np.full((8, 8), 255, dtype=np.uint8),
+                    out, "JPEG",
+                )
+            self.assertIn("Alpha channel dropped", buf.getvalue())
+            self.assertTrue(os.path.exists(out))
+
+    def test_grayscale_preserved_on_save(self):
+        import tempfile
+
+        from PIL import Image as PILImage
+
+        from purescale.cli import save_image_with_alpha
+
+        pipeline = PureScalePipeline()
+        res = pipeline.enhance(
+            np.full((16, 16), 128, dtype=np.uint8), config=PipelineConfig(scale=1.0)
+        )
+        self.assertTrue(res.is_grayscale)
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "g.png")
+            save_image_with_alpha(
+                res.image, res.alpha, out, "PNG", preserve_gray=res.is_grayscale
+            )
+            self.assertEqual(PILImage.open(out).mode, "L")
+
+        res2 = pipeline.enhance(
+            np.full((16, 16, 3), 128, dtype=np.uint8), config=PipelineConfig(scale=1.0)
+        )
+        self.assertFalse(res2.is_grayscale)
+
+
 if __name__ == "__main__":
     unittest.main()
