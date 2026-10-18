@@ -2595,5 +2595,231 @@ class TestPureScale4NeuralRobustness(unittest.TestCase):
         self.assertIn("CPU", engine.backend_name)
 
 
+class TestPureScale4GuiStability(unittest.TestCase):
+    """Worker resilience, cancellation, generation tokens, close guard, shortcut guards."""
+
+    def _make_app(self):
+        if not _TK_AVAILABLE:
+            self.skipTest("tkinter not available on this runner")
+        try:
+            import customtkinter  # noqa: F401
+        except ImportError as e:
+            self.skipTest(f"GUI dependencies not installed: {e}")
+        from purescale.gui.app import PureScaleApp
+        try:
+            app = PureScaleApp()
+            return app
+        except Exception as e:
+            if _is_display_error(e):
+                self.skipTest(f"Headless display not available: {e}")
+            raise
+
+    @staticmethod
+    def _pump(app, timeout_s: float = 5.0, until=None) -> None:
+        """Runs the Tk event loop until a predicate holds (or timeout)."""
+        import time as _time
+
+        deadline = _time.time() + timeout_s
+        while _time.time() < deadline:
+            try:
+                app.update()
+            except (tk.TclError, RuntimeError):
+                return
+            if until is not None and until():
+                return
+            _time.sleep(0.01)
+
+    def test_pipeline_cancel_check(self):
+        from purescale.config import PipelineCancelled
+        from purescale.pipeline import PureScalePipeline
+
+        pipeline = PureScalePipeline()
+        img = np.full((48, 48, 3), 128, dtype=np.uint8)
+        cfg = PipelineConfig(scale=1.0)
+
+        with self.assertRaises(PipelineCancelled):
+            pipeline.enhance(img, config=cfg, cancel_check=lambda: True)
+
+        # Mid-run cancellation: flip after the first stage report; the stage
+        # latencies recorded so far prove the partial run reached a stage.
+        state = {"n": 0}
+
+        def flip_after_first():
+            state["n"] += 1
+            return state["n"] > 1
+
+        with self.assertRaises(PipelineCancelled):
+            pipeline.enhance(img, config=cfg, cancel_check=flip_after_first)
+
+    def test_tile_cancel_check(self):
+        from purescale.config import PipelineCancelled
+        from purescale.neural.tiling import tile_process
+
+        img = np.zeros((300, 300, 3), dtype=np.uint8)
+
+        def identity_fn(patch):
+            return patch
+
+        with self.assertRaises(PipelineCancelled):
+            tile_process(
+                img, process_fn=identity_fn, scale=1,
+                tile_size=96, overlap=16, cancel_check=lambda: True,
+            )
+
+    def test_worker_survives_arbitrary_exception(self):
+        app = self._make_app()
+        try:
+            app.current_orig_bgr = np.full((32, 32, 3), 128, dtype=np.uint8)
+            app.current_alpha = None
+
+            def boom(*args, **kwargs):
+                raise AttributeError("unexpected internal error")
+
+            app.pipeline.enhance = boom
+            app._start_enhancement_async()
+            self.assertTrue(app.is_processing)
+            self._pump(app, until=lambda: not app.is_processing)
+            self.assertFalse(app.is_processing, "worker exception must not brick the app")
+            self.assertEqual(app.btn_enhance.cget("state"), "normal")
+            self.assertIn("unexpected internal error", app.status_label.cget("text"))
+        finally:
+            try:
+                app.destroy()
+            except (tk.TclError, RuntimeError):
+                pass
+
+    def test_cancel_flow_end_to_end(self):
+        from purescale.config import PipelineCancelled
+
+        app = self._make_app()
+        try:
+            app.current_orig_bgr = np.full((32, 32, 3), 128, dtype=np.uint8)
+            app.current_alpha = None
+
+            def cancellable(img, config=None, alpha=None, progress_callback=None, cancel_check=None):
+                import time as _time
+
+                deadline = _time.time() + 3.0
+                while not (cancel_check and cancel_check()):
+                    if _time.time() > deadline:
+                        raise PipelineCancelled("test watchdog")
+                    _time.sleep(0.01)
+                raise PipelineCancelled("cancelled")
+
+            app.pipeline.enhance = cancellable
+            app._start_enhancement_async()
+            self.assertTrue(app.is_processing)
+            self.assertEqual(app.btn_cancel.cget("state"), "normal")
+            app.after(30, app._on_cancel_click)
+            self._pump(app, until=lambda: not app.is_processing)
+            self.assertIn("Cancelled", app.status_label.cget("text"))
+            self.assertEqual(app.btn_enhance.cget("state"), "normal")
+            self.assertEqual(app.btn_cancel.cget("state"), "disabled")
+        finally:
+            try:
+                app.destroy()
+            except (tk.TclError, RuntimeError):
+                pass
+
+    def test_params_disabled_during_job(self):
+        app = self._make_app()
+        try:
+            app._set_params_enabled(False)
+            self.assertEqual(app.fmt_seg.cget("state"), "disabled")
+            app._set_params_enabled(True)
+            self.assertEqual(app.fmt_seg.cget("state"), "normal")
+        finally:
+            try:
+                app.destroy()
+            except (tk.TclError, RuntimeError):
+                pass
+
+    def test_stale_diagnostics_dropped(self):
+        from purescale.config import DiagnosticsResult
+
+        app = self._make_app()
+        try:
+            sentinel = DiagnosticsResult(noise_sigma=42.0)
+            app.current_diagnostics = sentinel
+            newer = DiagnosticsResult(noise_sigma=1.0)
+
+            # A stale generation must not touch state or HUD.
+            app._on_diagnostics_ready(999, newer, auto_style_on=False)
+            self.assertIs(app.current_diagnostics, sentinel)
+
+            app._on_diagnostics_ready(app._diag_generation, newer, auto_style_on=False)
+            self.assertIs(app.current_diagnostics, newer)
+        finally:
+            try:
+                app.destroy()
+            except (tk.TclError, RuntimeError):
+                pass
+
+    def test_load_blocked_while_processing(self):
+        app = self._make_app()
+        try:
+            app.is_processing = True
+            ok = app.load_image("whatever_not_loaded.png")
+            self.assertFalse(ok)
+            self.assertIn("Busy", app.status_label.cget("text"))
+        finally:
+            try:
+                app.destroy()
+            except (tk.TclError, RuntimeError):
+                pass
+
+    def test_close_handler_confirms_before_cancel(self):
+        app = self._make_app()
+        try:
+            import unittest.mock as mock
+
+            app.is_processing = True
+            with mock.patch("purescale.gui.app.messagebox.askyesno", return_value=False) as ask:
+                app._on_close()
+            ask.assert_called_once()
+            self.assertTrue(app.winfo_exists())  # window kept alive
+
+            with mock.patch("purescale.gui.app.messagebox.askyesno", return_value=True), \
+                    mock.patch.object(type(app), "destroy", side_effect=lambda: setattr(app, "_destroyed", True)):
+                app._on_close()
+            self.assertTrue(getattr(app, "_destroyed", False))
+        finally:
+            try:
+                if not getattr(app, "_destroyed", False):
+                    app.destroy()
+            except (tk.TclError, RuntimeError):
+                pass
+
+    def test_shortcut_guards(self):
+        app = self._make_app()
+        try:
+            # Processing blocks shortcuts.
+            calls = []
+            handler = app._guarded_shortcut(lambda: calls.append(1))
+            app.is_processing = True
+            handler()
+            self.assertEqual(calls, [])
+            app.is_processing = False
+            handler()
+            self.assertEqual(calls, [1])
+
+            # Typing in the preset filter blocks single-key shortcuts.
+            app.preset_opt.open()
+            self._pump(app, 0.3)
+            self.assertTrue(app._typing_in_entry(), "preset popup must count as typing")
+            handler()
+            self.assertEqual(len(calls), 1, "'r' must not fire while the filter popup is open")
+            app.preset_opt.close()
+            self._pump(app, 0.2)
+            self.assertFalse(app._typing_in_entry())
+            handler()
+            self.assertEqual(len(calls), 2)
+        finally:
+            try:
+                app.destroy()
+            except (tk.TclError, RuntimeError):
+                pass
+
+
 if __name__ == "__main__":
     unittest.main()

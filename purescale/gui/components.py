@@ -203,6 +203,10 @@ class PresetPicker(ctk.CTkFrame):
         self._current = label
         self._field.configure(text=label)
 
+    def is_open(self) -> bool:
+        """True while the popup is showing (used by the app's typing guard)."""
+        return self._popup is not None
+
     def toggle(self) -> None:
         """Opens the popup, or closes it when already open."""
         if self._popup is not None:
@@ -315,6 +319,13 @@ class PresetPicker(ctk.CTkFrame):
 
         self._popup = pop
         pop.deiconify()
+        # Modal grab: root-level single-key shortcuts ('r', 'f', '1', '+', ...)
+        # share bindtags with the filter entry; the grab keeps them out of the
+        # popup so typing a filter cannot reset parameters behind it.
+        try:
+            pop.grab_set()
+        except tk.TclError:
+            pass
         self._filter_entry.focus_set()
 
     def _refill(self, query: str) -> None:
@@ -366,6 +377,11 @@ class PresetPicker(ctk.CTkFrame):
     def close(self) -> None:
         """Destroys the popup and releases global bindings."""
         pop, self._popup = self._popup, None
+        if pop is not None:
+            try:
+                pop.grab_release()
+            except tk.TclError:
+                pass
         if self._wheel_ids:
             try:
                 root = self.winfo_toplevel()

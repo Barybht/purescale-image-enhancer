@@ -2,11 +2,11 @@
 
 import logging
 import os
-from typing import Optional
+from typing import Optional, Callable
 import cv2
 import numpy as np
 
-from purescale.config import DeviceTarget
+from purescale.config import DeviceTarget, PipelineCancelled
 from purescale.device import cpu_label, select_providers
 from purescale.neural.models import MODEL_REGISTRY, ModelManager, get_default_model_path
 from purescale.neural.tiling import tile_process
@@ -158,6 +158,7 @@ class NeuralSuperResEngine:
         tile_size: int = 256,
         tile_overlap: int = 32,
         fast_2x: bool = False,
+        cancel_check: Optional["Callable[[], bool]"] = None,
     ) -> np.ndarray:
         """
         Upscales input image using compact neural super-resolution with overlap tiling.
@@ -210,6 +211,7 @@ class NeuralSuperResEngine:
                 scale=self.native_scale,
                 tile_size=tile_size,
                 overlap=tile_overlap,
+                cancel_check=cancel_check,
             )
             if (fast_raw.shape[1], fast_raw.shape[0]) != (dest_w, dest_h):
                 return cv2.resize(fast_raw, (dest_w, dest_h), interpolation=cv2.INTER_LANCZOS4)
@@ -222,6 +224,7 @@ class NeuralSuperResEngine:
             scale=self.native_scale,
             tile_size=tile_size,
             overlap=tile_overlap,
+            cancel_check=cancel_check,
         )
 
         # If target scale equals native 4x, return directly
