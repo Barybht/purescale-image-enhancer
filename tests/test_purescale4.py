@@ -633,15 +633,56 @@ class TestPureScale4Pipeline(unittest.TestCase):
             return steps
 
         ref_steps = chain_steps()
-        for attempt in range(8):
-            for (name, ref_img), (_, new_img) in zip(ref_steps, chain_steps()):
-                if not np.array_equal(ref_img, new_img):
-                    n = int(np.sum(np.any(ref_img != new_img, axis=2)))
-                    msg = (f"chain attempt {attempt}: stage '{name}' diverged, {n} px, "
-                           f"max {int(np.max(np.abs(ref_img.astype(np.int32) - new_img.astype(np.int32))))} LSB")
-                    print("[DETERMINISM-chain]", msg)
-                    diffs.append(msg)
-                    break
+        easu_in = ref_steps[2][1]  # swf_blend output (deterministic across runs)
+        easu_ref = ref_steps[3][1]
+
+        # Wrapper-level flip rate on the identical input.
+        flips = 0
+        flip_where = []
+        for _ in range(24):
+            out = edge_adaptive_upsample(easu_in, scale=1.5)
+            if not np.array_equal(out, easu_ref):
+                flips += 1
+                ys, xs, ch = np.where(out != easu_ref)
+                flip_where.append(f"y={ys[0]} x={xs[0]} ch={ch[0]} ({easu_ref[ys[0], xs[0], ch[0]]} vs {out[ys[0], xs[0], ch[0]]})")
+        diffs.append(f"EASU wrapper flips on identical input: {flips}/24 ({flip_where[:2]})")
+
+        # Internal-op bisection on the same identical input.
+        import cv2 as _cv
+
+        lanczos = _cv.resize(easu_in, (150, 150), interpolation=_cv.INTER_LANCZOS4)
+        n = sum(0 if np.array_equal(_cv.resize(easu_in, (150, 150), interpolation=_cv.INTER_LANCZOS4), lanczos) else 1 for _ in range(24))
+        diffs.append(f"cv2.resize LANCZOS4 flips: {n}/24")
+
+        gray = _cv.cvtColor(easu_in, _cv.COLOR_BGR2GRAY).astype(np.float32)
+        gx = _cv.Sobel(gray, _cv.CV_32F, 1, 0, ksize=3)
+        gy = _cv.Sobel(gray, _cv.CV_32F, 0, 1, ksize=3)
+        mag = _cv.magnitude(gx, gy)
+        n = sum(0 if np.array_equal(_cv.magnitude(_cv.Sobel(gray, _cv.CV_32F, 1, 0, ksize=3), _cv.Sobel(gray, _cv.CV_32F, 0, 1, ksize=3)), mag) else 1 for _ in range(24))
+        diffs.append(f"Sobel+magnitude flips: {n}/24")
+
+        mag_up = _cv.resize(mag, (150, 150), interpolation=_cv.INTER_LINEAR)
+        n = sum(0 if np.array_equal(_cv.resize(mag, (150, 150), interpolation=_cv.INTER_LINEAR), mag_up) else 1 for _ in range(24))
+        diffs.append(f"cv2.resize LINEAR flips: {n}/24")
+
+        blur = _cv.GaussianBlur(lanczos, (3, 3), 0.5)
+        n = sum(0 if np.array_equal(_cv.GaussianBlur(lanczos, (3, 3), 0.5), blur) else 1 for _ in range(24))
+        diffs.append(f"GaussianBlur flips: {n}/24")
+
+        coherence = np.clip((mag_up - 20.0) / 40.0, 0.0, 1.0)[:, :, np.newaxis]
+        blend_ref = np.clip(
+            np.rint((1.0 - 0.25 * coherence) * lanczos.astype(np.float32) + (0.25 * coherence) * blur.astype(np.float32)),
+            0.0, 255.0,
+        ).astype(np.uint8)
+        n = 0
+        for _ in range(24):
+            o = np.clip(
+                np.rint((1.0 - 0.25 * coherence) * lanczos.astype(np.float32) + (0.25 * coherence) * blur.astype(np.float32)),
+                0.0, 255.0,
+            ).astype(np.uint8)
+            if not np.array_equal(o, blend_ref):
+                n += 1
+        diffs.append(f"numpy blend+rint flips: {n}/24")
 
         masks_fn = lambda: tuple(map(np.asarray, vars(extract_semantic_masks(img)).values()))  # noqa: E731
         probes = [
