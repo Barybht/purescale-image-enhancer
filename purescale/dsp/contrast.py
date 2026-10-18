@@ -68,8 +68,13 @@ def contrast_adaptive_sharpen(img: np.ndarray, strength: float = 1.2) -> np.ndar
     # Smooth sharpening ramp bounded by distance to dynamic range limits
     amp = np.clip(np.minimum(mn, 255.0 - mx) / (mx + 1e-5), 0.0, 1.0)
 
-    # Peak weight maps strength [0..3] -> reciprocal weight
-    peak = -1.0 / (np.interp(strength, [0.0, 3.0], [8.0, 3.5]) + 1e-5)
+    # Peak weight maps strength [0..3] -> reciprocal weight. The reciprocal
+    # curve crosses the CAS stability floor (1 + 4w > 0) near strength 2.667,
+    # where the denominator went negative and flipped edge pixels to black or
+    # white. Cap the peak at AMD's CAS floor (-1/5) so the denominator stays
+    # strictly positive for every legal strength; strengths <= 2.0 are
+    # bit-identical to the previous curve.
+    peak = -1.0 / (max(np.interp(strength, [0.0, 3.0], [8.0, 3.5]), 5.0) + 1e-5)
     w = amp * peak
 
     kernel_sum = b + d + f + h

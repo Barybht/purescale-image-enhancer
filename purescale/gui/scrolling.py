@@ -94,8 +94,6 @@ class SmoothScrollableFrame(ctk.CTkScrollableFrame):
     def _mouse_wheel_all(self, event) -> None:  # noqa: N802 (matches base name)
         if not self._check_if_valid_scroll(event.widget):
             return
-        if getattr(self, "_shift_pressed", False):
-            return  # No horizontal scrolling in the sidebar; ignore.
         pixels = wheel_pixels(
             delta=getattr(event, "delta", 0) or 0,
             button_num=getattr(event, "num", 0) or 0,

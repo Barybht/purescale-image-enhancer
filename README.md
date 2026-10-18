@@ -1,11 +1,11 @@
 # PureScale 4.0: Autonomous Multiscale Vision & Edge AI Engine
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/)
-[![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Barybht/purescale-image-enhancer/blob/main/simple_colab_enhancer.ipynb)
+[![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![OpenCV](https://img.shields.io/badge/OpenCV-5.x-5C3EE8?style=flat-square&logo=opencv&logoColor=white)](https://opencv.org/)
 [![DirectML](https://img.shields.io/badge/DirectML-GPU%20Accelerated-0078D4?style=flat-square&logo=windows&logoColor=white)](https://github.com/microsoft/DirectML)
 [![NumPy](https://img.shields.io/badge/NumPy-Vectorized-013243?style=flat-square&logo=numpy&logoColor=white)](https://numpy.org/)
-[![Hardware](https://img.shields.io/badge/Hardware-DirectML%20GPU%20%2B%20AVX512%20CPU-24292e?style=flat-square&logo=amd&logoColor=white)](https://github.com/)
+[![Hardware](https://img.shields.io/badge/Hardware-DirectML%20GPU%20%2B%20AVX512%20CPU-24292e?style=flat-square&logo=amd&logoColor=white)](BENCH.md)
 [![Latency](https://img.shields.io/badge/Latency-~2s%20(1080p%20PureDSP%201.0x)-blue?style=flat-square)](BENCH.md)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
@@ -191,7 +191,7 @@ automatically, filling only parameters still at library defaults
 | `sr_style` | `--style` | `photo` | registry styles | **Super-Resolution Style**: Neural weights + DSP profile family (`photo` for general images, `anime` for illustrations). Explicit choice always beats auto-detect. |
 | `auto_style` | `--auto-style` | False | Boolean | **Style Auto-Detect**: Classify content (photo/anime/manga) and re-route automatically at >= 0.60 confidence (implied by `--auto`). Gated by extreme tonal occupancy (>0.50) to protect continuous-tone B&W photos from false-positive manga routing. Manga content sets the DSP profile only (no manga weights exist). |
 | `style_profile` | `--style-profile` | follows style | `photo`, `anime`, `manga` | **DSP Profile Override**: Style parameter profile independent of neural weights (`manga` has DSP tuning but no dedicated weights yet). |
-| `preset` | `-p`, `--preset` | None | `balanced`, `portrait`, `landscape`, `low-light`, `art`, `manga`, `fast` | **Parameter Profile**: Loads pre-tuned empirical parameter profiles (`manga` preserves halftone screentones with denoise off; `art` uses anime style; `fast` skips heavy stages). |
+| `preset` | `-p`, `--preset` | None | `balanced`, `portrait`, `landscape`, `low-light`, `art`, `manga`, `fast`, `document`, `vintage`, `compression-fix`, `cinema`, `macro`, `pixel-art`, `golden-hour`, `astro`, `underwater`, `wildlife`, `architecture`, `street`, `film-noir` | **Parameter Profile**: Loads pre-tuned empirical parameter profiles (manga preserves halftone screentones with denoise off; `art` uses anime style; `fast` skips heavy stages). |
 | `dehaze` | `--dehaze` | 0.0 | 0.0 - 1.0 | **Atmospheric Dehaze**: Dark Channel Prior (DCP) fog/haze removal strength. |
 | `pyramid_detail` | `--pyramid-detail` | 1.20 | 0.5 - 2.0 | **Micro-Texture Gain**: Multiscale Local Laplacian octave band L1 detail boost. |
 | `pyramid_structure`| `--pyramid-structure`| 1.10 | 0.8 - 1.8 | **Structural Gain**: Multiscale Local Laplacian octave band L2 contour boost. |
