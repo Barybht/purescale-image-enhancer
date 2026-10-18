@@ -595,24 +595,53 @@ class TestPureScale4Pipeline(unittest.TestCase):
         for d in diffs:
             print("[DETERMINISM]", d)
 
-        # Portrait/YuNet probe: DNN inference on a noise image — suspected
-        # source of the cross-run 1-LSB border diffs.
-        from purescale.neural.portrait import detect_and_enhance_portrait
+        # Chained replication of the exact PureDSP sequence: finds the FIRST
+        # stage that diverges across identical-input runs (per-stage probes
+        # above use raw img; pipeline stages see prior-stage outputs).
+        def chain_steps():
+            steps = []
+            cur = img.copy()
+            diag = diagnose_image(cur)
+            damping = 0.15 if diag.noise_sigma > 4.0 else 0.0
+            masks = extract_semantic_masks(cur)
+            detail_map, denoise_map = compute_spatial_guidance_maps(
+                masks, guide=cv2.cvtColor(cur, cv2.COLOR_BGR2GRAY)
+            )
+            steps.append(("semantic", cur))
+            cur, _ = atmospheric_dehaze(cur, strength=0.3)
+            steps.append(("dehaze", cur))
+            den = side_window_filter(cur, radius=2, iterations=1, noise_sigma=diag.noise_sigma)
+            alpha_den = np.clip(denoise_map / 1.5, 0.20, 1.0)[:, :, np.newaxis]
+            cur = np.clip(
+                np.rint(alpha_den * den.astype(np.float32) + (1.0 - alpha_den) * cur.astype(np.float32)),
+                0.0, 255.0,
+            ).astype(np.uint8)
+            steps.append(("swf_blend", cur))
+            cur = edge_adaptive_upsample(cur, scale=1.5)
+            steps.append(("easu", cur))
+            detail_scaled = cv2.resize(detail_map, (cur.shape[1], cur.shape[0]), interpolation=cv2.INTER_LINEAR)
+            cur = multiscale_laplacian_filter(cur, 1.2, 1.1, damping, 0.0, detail_scaled)
+            steps.append(("pyramid", cur))
+            cur = bimef_exposure_fusion(cur, 1.8)
+            steps.append(("bimef", cur))
+            cur = contrast_adaptive_sharpen(cur, 1.1)
+            steps.append(("cas", cur))
+            cur = oklab_vibrance(cur, 1.10)
+            steps.append(("oklab", cur))
+            cur = bradford_cat16_white_balance(cur, 0)
+            steps.append(("cat16", cur))
+            return steps
 
-        portrait_stats = []
-        p_first, p_faces0 = detect_and_enhance_portrait(img, portrait_smooth=35, eye_clarity=1.3)
-        portrait_stats.append(p_faces0)
-        p_flips = 0
-        for _ in range(7):
-            p_again, p_faces = detect_and_enhance_portrait(img, portrait_smooth=35, eye_clarity=1.3)
-            portrait_stats.append(p_faces)
-            if not np.array_equal(p_first, p_again):
-                p_flips += 1
-                ys, xs, ch = np.where(p_first != p_again)
-                print(f"[DETERMINISM] portrait differs on rerun: {len(ys)} px, first y={ys[0]} x={xs[0]}")
-        print(f"[DETERMINISM] portrait faces_detected per run: {portrait_stats}, output flips: {p_flips}/7")
-        if p_flips:
-            diffs.append(f"portrait: {p_flips}/7 reruns differ (faces per run: {portrait_stats})")
+        ref_steps = chain_steps()
+        for attempt in range(8):
+            for (name, ref_img), (_, new_img) in zip(ref_steps, chain_steps()):
+                if not np.array_equal(ref_img, new_img):
+                    n = int(np.sum(np.any(ref_img != new_img, axis=2)))
+                    msg = (f"chain attempt {attempt}: stage '{name}' diverged, {n} px, "
+                           f"max {int(np.max(np.abs(ref_img.astype(np.int32) - new_img.astype(np.int32))))} LSB")
+                    print("[DETERMINISM-chain]", msg)
+                    diffs.append(msg)
+                    break
 
         masks_fn = lambda: tuple(map(np.asarray, vars(extract_semantic_masks(img)).values()))  # noqa: E731
         probes = [
