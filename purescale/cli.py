@@ -5,7 +5,7 @@ import json
 import os
 import sys
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 import cv2
 import numpy as np
 from PIL import Image, ImageOps
@@ -30,10 +30,15 @@ SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff", ".tif
 def load_image_with_alpha(path: str, return_meta: bool = False):
     """Loads image, handles EXIF orientation tag 274, and separates alpha channel."""
     pil_img = Image.open(path)
+
+    # exif_transpose() rotates the pixels upright and neutralizes the
+    # Orientation tag on the in-memory image. Capturing the EXIF/ICC blocks
+    # AFTER the transpose (not before) preserves camera metadata while
+    # dropping the stale Orientation tag, so consumers of the saved file
+    # cannot double-rotate the already-upright pixels.
+    pil_img = ImageOps.exif_transpose(pil_img)
     exif_bytes = pil_img.info.get("exif")
     icc_profile = pil_img.info.get("icc_profile")
-
-    pil_img = ImageOps.exif_transpose(pil_img)
     arr = np.array(pil_img)
 
     alpha = None
@@ -142,7 +147,14 @@ def process_file(pipeline: PureScalePipeline, cfg: PipelineConfig, in_path: str,
             elif "quality_error" in info:
                 print(f"  Quality:    skipped ({info['quality_error']})")
         return info
-    except (OSError, IOError, ValueError, cv2.error, RuntimeError, MemoryError) as err:
+    except (
+        OSError,
+        ValueError,
+        cv2.error,
+        RuntimeError,
+        MemoryError,
+        Image.DecompressionBombError,
+    ) as err:
         print(f"[ERROR] Failed to process {in_path}: {err}", file=sys.stderr)
         return None
 
@@ -180,7 +192,7 @@ def main_compare(argv: List[str]) -> int:
 
 def main(args: List[str] = None) -> int:
     """CLI entrypoint."""
-    if args and len(args) > 0 and args[0] == "compare":
+    if args and args[0] == "compare":
         return main_compare(args[1:])
     parser = argparse.ArgumentParser(
         description="PureScale 4.0: Autonomous Multiscale Computational Vision & Edge AI Engine",
@@ -332,8 +344,12 @@ def main(args: List[str] = None) -> int:
 
     # Diagnostics inspection mode
     if parsed.diagnostics and os.path.isfile(in_path):
-        bgr, _ = load_image_with_alpha(in_path)
-        diag = diagnose_image(bgr)
+        try:
+            bgr, _ = load_image_with_alpha(in_path)
+            diag = diagnose_image(bgr)
+        except (OSError, ValueError, cv2.error, RuntimeError, MemoryError) as err:
+            print(f"[ERROR] Failed to analyze {in_path}: {err}", file=sys.stderr)
+            return 1
         if parsed.json:
             payload = {"input": in_path}
             payload.update(diag.to_dict())
@@ -464,8 +480,15 @@ def main(args: List[str] = None) -> int:
         os.makedirs(out_dir, exist_ok=True)
 
         rel_files = []
+        # The default output directory lives inside the input directory; a
+        # recursive walk must not re-ingest previously generated outputs,
+        # or every run would enhance its own *_enhanced files again.
+        skip_dir = os.path.abspath(out_dir)
         if parsed.recursive:
             for root, _, filenames in os.walk(in_path):
+                root_abs = os.path.abspath(root)
+                if root_abs == skip_dir or root_abs.startswith(skip_dir + os.sep):
+                    continue
                 for f in sorted(filenames):
                     if os.path.splitext(f.lower())[1] in SUPPORTED_EXTENSIONS:
                         rel_path = os.path.relpath(os.path.join(root, f), in_path)
@@ -513,6 +536,9 @@ def main(args: List[str] = None) -> int:
             }))
         else:
             print(f"\n[COMPLETE] Batch finished in {total_batch_time:.2f} s: {successes} succeeded, {failures} failed ({total_batch_time/len(rel_files)*1000:.1f} ms/image average)")
+
+        # Scripting contract: a batch with any failed file must exit non-zero.
+        return 1 if failures else 0
 
     return 0
 

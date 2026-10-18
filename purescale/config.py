@@ -563,7 +563,7 @@ PRESETS: Dict[str, Dict[str, Any]] = {
         "pyramid_structure_boost": 1.05,
         "enable_semantic_guidance": True,
         "enable_local_tone": False,
-        "depixel_strength": 0.80,
+        "depixel_strength": 80,
     },
     "cinema": {
         "scale": 2.0,

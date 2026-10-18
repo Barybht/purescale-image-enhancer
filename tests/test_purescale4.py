@@ -426,6 +426,23 @@ class TestPureScale4Contrast(unittest.TestCase):
             self.assertEqual(out.dtype, np.uint8)
             self.assertTrue(np.all(np.isfinite(out.astype(np.float32))))
 
+    def test_cas_no_inversion_at_high_strength(self):
+        """CAS must stay bounded at legal strengths > 2.667 (regression: the
+        reciprocal peak weight crossed the 1 + 4w > 0 stability floor and
+        inverted edge pixels to black/white)."""
+        from purescale.dsp.contrast import contrast_adaptive_sharpen
+
+        # 95/105 step edge: edge-adjacent pixels reach ~0.9 local amplitude,
+        # exactly the regime where the old denominator went negative
+        # (outputs of ~30 and ~170 instead of a bounded sharpening).
+        img = np.full((32, 32, 3), 95, dtype=np.uint8)
+        img[:, 16:] = 105
+        for strength in (2.7, 2.8, 3.0):
+            with self.subTest(strength=strength):
+                out = contrast_adaptive_sharpen(img, strength=strength)
+                self.assertGreaterEqual(int(out.min()), 70)
+                self.assertLessEqual(int(out.max()), 150)
+
 
 class TestPureScale4Pipeline(unittest.TestCase):
     """Test suite for end-to-end PureScale 4.0 Pipeline determinism."""
@@ -1714,6 +1731,16 @@ class TestPureScale4Packaging(unittest.TestCase):
                 self.assertGreaterEqual(cfg.scale, 1.0)
                 self.assertGreaterEqual(cfg.sharpen_strength, 0.0)
 
+    def test_compression_fix_preset_depixel_scale(self):
+        from purescale.config import get_preset_config
+
+        cfg = get_preset_config("compression-fix")
+        # Regression: this preset shipped depixel_strength as 0.80 (a float on
+        # the 0-100 scale); validate()'s float coercion accepted it, so the
+        # de-pixelation stage ran at <1% of the intended strength.
+        self.assertEqual(cfg.depixel_strength, 80)
+        self.assertIsInstance(cfg.depixel_strength, int)
+
     def test_diagnostics_result_single_source(self):
         from purescale.config import DiagnosticsResult as FromConfig
         from purescale.dsp.diagnostics import DiagnosticsResult as FromDsp
@@ -1873,6 +1900,79 @@ class TestPureScale4Models(unittest.TestCase):
         else:
             self.assertEqual(providers, ["CPUExecutionProvider"])
         self.assertTrue(name)
+
+
+class TestPureScale4CliBatch(unittest.TestCase):
+    """Batch-mode exit codes, recursive output-dir exclusion, EXIF round-trip."""
+
+    def test_batch_exit_code_reflects_failures(self):
+        import tempfile
+
+        from purescale.cli import main
+
+        # One decodable + one corrupt file -> the batch must exit 1.
+        with tempfile.TemporaryDirectory() as tmp:
+            cv2.imwrite(os.path.join(tmp, "good.png"), np.zeros((16, 16, 3), dtype=np.uint8))
+            with open(os.path.join(tmp, "bad.png"), "wb") as fp:
+                fp.write(b"not an image")
+            code = main([tmp, "-o", os.path.join(tmp, "out"), "--scale", "1.0", "--quiet"])
+            self.assertEqual(code, 1)
+
+        # All-good directory -> exit 0.
+        with tempfile.TemporaryDirectory() as tmp:
+            cv2.imwrite(os.path.join(tmp, "a.png"), np.zeros((16, 16, 3), dtype=np.uint8))
+            code = main([tmp, "-o", os.path.join(tmp, "out"), "--scale", "1.0", "--quiet"])
+            self.assertEqual(code, 0)
+
+    def test_recursive_walk_skips_output_directory(self):
+        import tempfile
+
+        from purescale.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cv2.imwrite(os.path.join(tmp, "a.png"), np.zeros((16, 16, 3), dtype=np.uint8))
+            nested = os.path.join(tmp, "enhanced")
+            os.makedirs(nested)
+            cv2.imwrite(os.path.join(nested, "b_enhanced.png"), np.zeros((16, 16, 3), dtype=np.uint8))
+
+            code = main([tmp, "--recursive", "--scale", "1.0", "--quiet"])
+            self.assertEqual(code, 0)
+            # Only the top-level input was processed; the enhanced/ output
+            # subtree must never be re-ingested (previously b_enhanced.png was
+            # re-enhanced into b_enhanced_enhanced.png on every run).
+            self.assertTrue(os.path.exists(os.path.join(nested, "a_enhanced.png")))
+            self.assertFalse(os.path.exists(os.path.join(nested, "b_enhanced_enhanced.png")))
+
+    def test_exif_orientation_round_trip(self):
+        # Regression: EXIF was captured before exif_transpose(), so saved files
+        # re-carried the stale Orientation tag and orientation-aware consumers
+        # double-rotated the already-upright pixels.
+        import tempfile
+
+        from PIL import Image as PILImage, ImageOps
+
+        from purescale.cli import load_image_with_alpha, save_image_with_alpha
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "in.jpg")
+            out = os.path.join(tmp, "out.jpg")
+            exif = PILImage.Exif()
+            exif[274] = 6  # 90 deg CW display rotation
+            PILImage.new("RGB", (20, 10), (200, 30, 30)).save(src, format="JPEG", exif=exif.tobytes())
+
+            bgr, alpha, exif_bytes, _icc = load_image_with_alpha(src, return_meta=True)
+            self.assertEqual(bgr.shape, (20, 10, 3))  # pixels transposed upright
+            save_image_with_alpha(bgr, alpha, out, "JPEG", exif=exif_bytes)
+
+            saved = PILImage.open(out)
+            self.assertEqual(saved.size, (10, 20))
+            stale = PILImage.Exif()
+            stale.load(exif_bytes)
+            self.assertNotEqual(stale.get(274), 6)  # stale Orientation tag gone
+            # A second orientation pass must be a no-op on the saved pixels.
+            self.assertTrue(
+                np.array_equal(np.asarray(ImageOps.exif_transpose(saved)), np.asarray(saved))
+            )
 
 
 if __name__ == "__main__":

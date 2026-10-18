@@ -3,7 +3,6 @@
 import logging
 import os
 import threading
-import time
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from typing import Dict, Optional
@@ -491,7 +490,6 @@ class PureScaleApp(ctk.CTk):
             font=font("mono11b"),
         )
         self.btn_reset_params.pack(side="right")
-        self.preset_seg = self.preset_opt
 
         # 2b. Performance & Telemetry Card
         self.perf_card = ParameterCard(

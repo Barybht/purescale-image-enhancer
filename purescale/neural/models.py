@@ -2,7 +2,6 @@
 
 import hashlib
 import os
-import sys
 import urllib.request
 import urllib.error
 import http.client

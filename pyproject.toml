@@ -8,6 +8,30 @@ version = "4.0.0"
 description = "Autonomous Multiscale Computational Vision and Edge AI Enhancement Engine"
 readme = "README.md"
 requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Barybht" }]
+keywords = [
+    "image-enhancement",
+    "super-resolution",
+    "computer-vision",
+    "opencv",
+    "onnx",
+    "image-processing",
+    "realesrgan",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Graphics :: Graphics Conversion",
+]
 dependencies = [
     "opencv-python>=4.8.0",
     "numpy>=1.24.0",
@@ -21,6 +45,18 @@ gui = [
     "onnxruntime>=1.16.0; sys_platform != 'win32'",
 ]
 
+[project.urls]
+Homepage = "https://github.com/Barybht/purescale-image-enhancer"
+Repository = "https://github.com/Barybht/purescale-image-enhancer"
+Issues = "https://github.com/Barybht/purescale-image-enhancer/issues"
+
 [project.scripts]
 purescale = "purescale.cli:main"
 purescale-gui = "purescale.gui.app:launch_gui"
+
+# Explicit package discovery. The repo root also hosts thin launcher modules
+# (enhance_image.py, gui.py, engine_2026.py, portrait.py) and the bench/models
+# directories; flat-layout auto-discovery sees all of them as top-level
+# candidates and aborts, which broke `pip install -e .` / `pip wheel`.
+[tool.setuptools.packages.find]
+include = ["purescale*"]
