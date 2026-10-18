@@ -331,13 +331,22 @@ class PureScalePipeline:
         Executes enhancement across configured mode with PureScale 4.0 computer vision.
 
         Args:
-            img: BGR uint8 input image [H, W, 3]
+            img: BGR uint8 input image [H, W, 3] (also accepted: gray [H, W],
+                BGRA [H, W, 4], or single-channel [H, W, 1]). Anything else
+                raises ``ValueError`` with an actionable message: dtype must
+                be uint8, 2-channel layouts and >8-bit sources must be
+                converted by the caller, empty images are rejected.
             config: Optional PipelineConfig override
             alpha: Optional alpha channel mask [H, W] uint8
             progress_callback: Optional callback(stage_name, progress_ratio)
 
         Returns:
-            ProcessingResult containing enhanced image, diagnostics, and telemetry
+            ProcessingResult containing enhanced image, diagnostics, and
+            telemetry. ``is_grayscale`` reports whether the input was
+            luminance-only (use ``preserve_gray`` when saving).
+
+        Raises:
+            ValueError: On invalid input arrays or invalid config values.
         """
         # Deep-copy (not the historical to_dict() round-trip): preserves enum
         # identity and the explicit-field tracking that style-profile
@@ -345,6 +354,26 @@ class PureScalePipeline:
         src_cfg = config if config is not None else self.config
         cfg = copy.deepcopy(src_cfg)
         cfg.validate()
+
+        # Input contract (documented in the docstring): reject invalid inputs
+        # with actionable messages instead of opaque cv2 errors deep inside
+        # the DSP stages.
+        if not isinstance(img, np.ndarray):
+            raise ValueError(f"img must be a numpy array, got {type(img).__name__}.")
+        if img.size == 0:
+            raise ValueError("img is empty (0 pixels).")
+        if img.dtype != np.uint8:
+            raise ValueError(
+                f"img dtype must be uint8, got {img.dtype}. Convert to 8-bit first, "
+                "e.g. np.clip(img, 0, 255).astype(np.uint8)."
+            )
+        if img.ndim == 3 and img.shape[2] not in (1, 3, 4):
+            raise ValueError(
+                f"img must have 1, 3, or 4 channels, got {img.shape[2]}. "
+                "2-channel layouts (e.g. gray + alpha) must be split explicitly."
+            )
+        if img.ndim not in (2, 3):
+            raise ValueError(f"img must be 2D [H, W] or 3D [H, W, C], got {img.ndim} dimensions.")
         t_start = time.perf_counter()
         stage_latencies = {}
         faces_detected = 0
@@ -656,6 +685,7 @@ class PureScalePipeline:
         return ProcessingResult(
             image=cur,
             alpha=alpha,
+            is_grayscale=is_grayscale,
             latency_ms=total_latency,
             backend_name=active_backend,
             mode_name=mode.value,

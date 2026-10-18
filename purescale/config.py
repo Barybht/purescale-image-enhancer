@@ -239,6 +239,22 @@ class PipelineConfig:
             raise ValueError(
                 f"Invalid output_format: {self.output_format!r}. Must be PNG, JPEG, or WebP."
             )
+        if not isinstance(self.mode, ProcessingMode):
+            try:
+                ProcessingMode(self.mode)
+            except ValueError:
+                raise ValueError(
+                    f"Invalid mode: {self.mode!r}. Must be one of "
+                    f"{[m.value for m in ProcessingMode]}."
+                )
+        if not isinstance(self.device, DeviceTarget):
+            try:
+                DeviceTarget(self.device)
+            except ValueError:
+                raise ValueError(
+                    f"Invalid device: {self.device!r}. Must be one of "
+                    f"{[d.value for d in DeviceTarget]}."
+                )
         if not isinstance(self.enable_fast_2x, bool):
             raise ValueError(
                 f"Invalid enable_fast_2x: {self.enable_fast_2x!r}. Must be a boolean."
@@ -382,6 +398,7 @@ class ProcessingResult:
     """Execution output, diagnostics, and performance telemetry."""
     image: np.ndarray
     alpha: Optional[np.ndarray] = None
+    is_grayscale: bool = False
     latency_ms: float = 0.0
     backend_name: str = "CPU"
     mode_name: str = "puredsp"
