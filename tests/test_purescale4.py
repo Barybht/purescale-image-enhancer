@@ -80,6 +80,17 @@ class TestPureScale4Diagnostics(unittest.TestCase):
         self.assertLess(sigma_clean, 1.0)
         self.assertEqual(cat_clean, "Clean")
 
+    def test_wavelet_noise_mad_tiny_image(self):
+        # Regression: images with a 1-px dimension produced an empty HH1
+        # subband; median([]) is NaN and every threshold comparison is False,
+        # so tiny images used to classify as "Heavy" noise.
+        from purescale.dsp.diagnostics import estimate_wavelet_noise_mad
+
+        for shape in ((1, 8), (8, 1)):
+            with self.subTest(shape=shape):
+                sigma, cat = estimate_wavelet_noise_mad(np.zeros(shape, dtype=np.uint8))
+                self.assertEqual((sigma, cat), (0.0, "Clean"))
+
     def test_optical_blur_estimation(self):
         # Sharp synthetic checkerboard
         sharp = np.zeros((128, 128), dtype=np.uint8)
@@ -294,6 +305,38 @@ class TestPureScale4SemanticAndDehaze(unittest.TestCase):
         self.assertTrue(np.array_equal(proxy, again))
 
 
+    def test_guidance_gain_maps_survive_refinement(self):
+        # Regression: fast_guided_filter's [0, 1] output clip silently
+        # flattened semantic guidance gains above 1.0 (and its >1.5 heuristic
+        # misread a 1.85-max map as [0, 255]-scale input), discarding the
+        # designed foliage/structure detail boost and sky denoise boost.
+        from purescale.dsp.semantic import (
+            SemanticMasks,
+            compute_spatial_guidance_maps,
+        )
+
+        zeros = np.zeros((64, 64), np.float32)
+        guide = np.tile(np.linspace(0, 255, 64, dtype=np.uint8), (64, 1))
+
+        # Foliage + structure both boosted: detail map tops out at 1.45.
+        masks = SemanticMasks(
+            sky=zeros, foliage=np.ones((64, 64), np.float32), skin=zeros,
+            shadow=zeros, structure=np.ones((64, 64), np.float32), breakdown={},
+        )
+        detail, _ = compute_spatial_guidance_maps(masks, guide=guide)
+        self.assertGreater(float(detail.max()), 1.40)  # old code: clipped to 1.0
+        self.assertGreaterEqual(float(detail.min()), 0.14)
+
+        # Full sky: denoise map tops out at 1.60.
+        masks = SemanticMasks(
+            sky=np.ones((64, 64), np.float32), foliage=zeros, skin=zeros,
+            shadow=zeros, structure=zeros, breakdown={},
+        )
+        _, denoise = compute_spatial_guidance_maps(masks, guide=guide)
+        self.assertGreater(float(denoise.max()), 1.55)
+        self.assertGreaterEqual(float(denoise.min()), 0.40)
+
+
 class TestPureScale4SideWindowFilter(unittest.TestCase):
     """Tests luminance-selection SWF: determinism, denoising, edge preservation."""
 
@@ -325,6 +368,40 @@ class TestPureScale4SideWindowFilter(unittest.TestCase):
         clean = np.full((64, 64, 3), 128, dtype=np.uint8)
         out = side_window_filter(clean, radius=2, iterations=1, noise_sigma=0.5)
         self.assertTrue(np.array_equal(out, clean))
+
+    def test_swf_windows_include_center(self):
+        # Regression: the 8 directional window slices were consumed with the
+        # default center-anchored boxFilter, silently shifting every window by
+        # ((kh-1)//2, (kw-1)//2) so 5 of 8 windows excluded the center pixel.
+        # Canonical SWF (Yin et al. 2015) requires all windows to share the
+        # center. This pins the geometry: each window mean at an impulse
+        # center must equal the analytic mean over the intended window.
+        import cv2
+
+        r = 2
+        h = w = 32
+        gray = np.full((h, w), 100.0, dtype=np.float32)
+        gray[16, 16] = 200.0  # impulse at the center pixel only
+        padded = np.pad(gray, r, mode="reflect")
+
+        windows = [
+            (-r, 0, -r, 0), (-r, 0, 0, r), (0, r, -r, 0), (0, r, 0, r),
+            (-r, 0, -r, r), (0, r, -r, r), (-r, r, -r, 0), (-r, r, 0, r),
+        ]
+        for r1, r2, c1, c2 in windows:
+            kh, kw = r2 - r1 + 1, c2 - c1 + 1
+            p_r1 = r + r1
+            sub = padded[p_r1 : p_r1 + h + kh, r + c1 : r + c1 + w + kw]
+            with self.subTest(window=(r1, r2, c1, c2)):
+                # Corner anchor: window top-left at the (r1, c1) offset.
+                mean = cv2.boxFilter(sub, cv2.CV_32F, (kw, kh), anchor=(0, 0))[:h, :w]
+                # Center-inclusion: the impulse lies inside every window, so
+                # the mean must rise above the pure background value.
+                self.assertGreater(float(mean[16, 16]), 100.0)
+                # Exact geometry: equals the analytic mean of the intended
+                # window (the old center-anchored slicing fails both checks).
+                win = padded[16 + r + r1 : 16 + r + r2 + 1, 16 + r + c1 : 16 + r + c2 + 1]
+                self.assertAlmostEqual(float(mean[16, 16]), float(win.mean()), places=3)
 
     def test_swf_proxy_consistency(self):
         # Proxy path must stay near-identical to the full-res path while
@@ -594,7 +671,13 @@ class TestPureScale4Pipeline(unittest.TestCase):
         self.assertGreater(manga_retention, 0.85, f"Manga preset smoothed screentone: {manga_retention:.1%}")
 
         bal_retention = var_bal / var_in
-        self.assertLess(bal_retention, 0.35, f"Balanced preset did not smooth noise: {bal_retention:.1%}")
+        # Threshold recalibrated after the SWF window-geometry fix: center-
+        # inclusive windows (canonical Yin 2015 behavior) intentionally
+        # preserve more fine structure, so balanced now retains ~40% of the
+        # 2-px dot variance instead of the ~35% the over-smoothing bug
+        # produced. Real noise is still crushed (test_swf_determinism_and_
+        # denoising halves the std); the manga-vs-balanced gap stays >2x.
+        self.assertLess(bal_retention, 0.45, f"Balanced preset did not smooth noise: {bal_retention:.1%}")
 
     def test_anime_style_grayscale_handling(self):
         pipeline = PureScalePipeline()
@@ -1390,6 +1473,30 @@ class TestPureScale4StyleProfiles(unittest.TestCase):
         cfg = apply_style_profile(PipelineConfig(sr_style="photo", style_profile="manga"))
         self.assertFalse(cfg.enable_denoise)
 
+    def test_explicit_default_equal_value_wins(self):
+        # Regression: precedence decided "explicit" by comparing against
+        # library defaults, so a flag/preset value that HAPPENED to equal the
+        # default was silently overridden by the profile.
+        from purescale.config import apply_style_profile
+
+        cfg = PipelineConfig(sr_style="anime")
+        cfg.contrast_boost = 1.8  # explicit CLI/preset value == library default
+        out = apply_style_profile(cfg)
+        self.assertEqual(out.contrast_boost, 1.8)  # not the anime profile's 1.5
+
+    def test_auto_tune_wins_over_profile(self):
+        # Regression: auto-tune on a noisy manga page re-enables denoise
+        # (which equals the library default True); the manga profile used to
+        # flip it back off, discarding the tuner's decision.
+        from purescale.config import apply_style_profile
+
+        cfg = PipelineConfig(style_profile="manga")
+        cfg.enable_denoise = True   # as auto_tune_parameters would set it
+        cfg.denoise_intensity = 55
+        out = apply_style_profile(cfg)
+        self.assertTrue(out.enable_denoise)
+        self.assertEqual(out.denoise_intensity, 55)
+
     def test_unknown_profile_raises(self):
         with self.assertRaises(ValueError):
             PipelineConfig(style_profile="nope")
@@ -1546,20 +1653,34 @@ class TestPureScale4AutoStyle(unittest.TestCase):
         """Ensures continuous-tone B&W photos do not get misclassified as manga."""
         from purescale.dsp.diagnostics import classify_content_style
 
+        # golden_texture.png is a two-tone checkerboard: once the semantic
+        # structure boost is actually applied (it was silently clipped to
+        # 1.0 before), it legitimately reads as halftone-like to the
+        # classifier and is NOT a continuous-tone B&W photo probe. The
+        # photo/edge goldens plus a synthetic continuous-tone B&W wave cover
+        # the anti-false-positive intent; halftone-like inputs belong to the
+        # dedicated manga probe tests below.
+        probes = []
         fixtures_dir = os.path.join(os.path.dirname(__file__), "fixtures")
-        for fname in ("golden_photo.png", "golden_edge.png", "golden_texture.png"):
+        for fname in ("golden_photo.png", "golden_edge.png"):
             path = os.path.join(fixtures_dir, fname)
-            if not os.path.exists(path):
-                continue
-            bgr = cv2.imread(path)
+            if os.path.exists(path):
+                probes.append((fname, cv2.imread(path)))
+        wave = 120 + 60 * np.sin(np.linspace(0, 6, 128))[None, :, None]
+        bw_photo = np.clip(
+            wave + np.random.default_rng(5).normal(0, 5.0, (128, 128, 3)), 0, 255
+        ).astype(np.uint8)
+        probes.append(("synthetic-bw-photo", bw_photo))
+
+        for name, bgr in probes:
             gray_2d = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
             gray_3d = cv2.cvtColor(gray_2d, cv2.COLOR_GRAY2BGR)
 
             style_2d, _ = classify_content_style(gray_2d)
-            self.assertEqual(style_2d, "photo", f"2D grayscale {fname} misclassified as {style_2d}")
+            self.assertEqual(style_2d, "photo", f"2D grayscale {name} misclassified as {style_2d}")
 
             style_3d, _ = classify_content_style(gray_3d)
-            self.assertEqual(style_3d, "photo", f"3D grayscale {fname} misclassified as {style_3d}")
+            self.assertEqual(style_3d, "photo", f"3D grayscale {name} misclassified as {style_3d}")
 
     def test_classifier_edge_cases(self):
         """Tests that irregular/edge-case inputs do not raise errors."""

@@ -2,6 +2,13 @@
 
 Pure mathematical formulations running deterministically in milliseconds
 on modern Zen 4 CPU SIMD architectures.
+
+Luminance standards are deliberately stage-local: edge-selection and tone
+stages (SWF, BIMEF, local tone mapping) use Rec.709 weights in float math,
+while structure/gradient stages (EASU, shock filter, semantic parsing,
+diagnostics gray, dehaze airlight) use OpenCV's BT.601 ``BGR2GRAY``. Within
+each stage the choice is consistent; across stages saturated reds/blues can
+differ by up to ~2% luminance between a "selection" and a "structure" read.
 """
 
 from purescale.dsp.filters import side_window_filter, fast_guided_filter

@@ -59,7 +59,11 @@ def estimate_atmospheric_light(img_norm: np.ndarray, dark_channel: np.ndarray) -
     best_idx = np.argmax(luminances)
     airlight = candidates[best_idx]
 
-    # Ensure airlight is physically plausible (not completely dark)
+    # Airlight floor (deliberate deviation from He et al. 2009): on genuinely
+    # dark scenes (night, underwater) an unclamped airlight collapses the
+    # transmission estimate and drives J = (I - A)/t + A into heavy clipping.
+    # 0.40 keeps radiance recovery stable; the trade-off is a slight warm/flat
+    # bias on legitimately dark scenes.
     airlight = np.maximum(airlight, 0.40)
     return airlight
 

@@ -104,9 +104,15 @@ def side_window_filter(img: np.ndarray, radius: int = 2, iterations: int = 1,
             sub_g = gray_padded[p_r1 : p_r2 + 1, p_c1 : p_c2 + 1]
             sub_gsq = gray_sq[p_r1 : p_r2 + 1, p_c1 : p_c2 + 1]
 
-            mean = cv2.boxFilter(sub_p, cv2.CV_32F, (kw, kh))[:h, :w]
-            g_mean = cv2.boxFilter(sub_g, cv2.CV_32F, (kw, kh))[:h, :w]
-            g_sq_mean = cv2.boxFilter(sub_gsq, cv2.CV_32F, (kw, kh))[:h, :w]
+            # Corner-anchored boxFilter: the (kh x kw) window's top-left sits
+            # at the (r1, c1) offset relative to each pixel — exactly the SWF
+            # half-window geometry where all 8 windows share the center pixel
+            # (Yin et al. 2015). The default center anchor silently shifted
+            # every window by ((kh-1)//2, (kw-1)//2), excluding the center
+            # from 5 of 8 windows and weakening corner preservation.
+            mean = cv2.boxFilter(sub_p, cv2.CV_32F, (kw, kh), anchor=(0, 0))[:h, :w]
+            g_mean = cv2.boxFilter(sub_g, cv2.CV_32F, (kw, kh), anchor=(0, 0))[:h, :w]
+            g_sq_mean = cv2.boxFilter(sub_gsq, cv2.CV_32F, (kw, kh), anchor=(0, 0))[:h, :w]
             g_var = np.maximum(0.0, g_sq_mean - g_mean * g_mean)
 
             score = np.abs(g_mean - gray) + 0.1 * g_var
@@ -128,6 +134,7 @@ def fast_guided_filter(
     radius: int = 8,
     eps: float = 1e-3,
     subsample: int = 4,
+    value_range: str = "auto",
 ) -> np.ndarray:
     """
     Subsampled Fast Guided Filter (He et al., ECCV 2010 / TPAMI 2013).
@@ -142,10 +149,19 @@ def fast_guided_filter(
         radius: Local window radius.
         eps: Regularization parameter.
         subsample: Spatial subsampling factor for O(N/s^2) acceleration.
+        value_range: How float ``src`` values are interpreted.
+            "auto": heuristic — float ``src`` with max > 1.5 is treated as
+            the [0, 255] scale, otherwise as [0, 1].
+            "gain": ``src`` is a gain/weight map whose values may legitimately
+            exceed 1.0 (semantic guidance maps reach ~1.85). Never rescaled;
+            the output is clamped to [0, max(1.0, src.max())] instead of
+            [0, 1] so gains above 1.0 survive the filter.
 
     Returns:
         Filtered image with identical shape and dtype as `src`.
     """
+    if value_range not in ("auto", "gain"):
+        raise ValueError(f"Invalid value_range: {value_range!r}. Must be 'auto' or 'gain'.")
     if radius <= 0:
         return src.copy()
 
@@ -154,6 +170,7 @@ def fast_guided_filter(
         return src.copy()
 
     is_uint8 = (src.dtype == np.uint8)
+    is_gain = (value_range == "gain")
 
     # Normalize guide to float32 in [0.0, 1.0]
     if guide.dtype == np.uint8:
@@ -163,9 +180,11 @@ def fast_guided_filter(
         if float(np.max(g)) > 1.5:
             g = g / 255.0
 
-    # Normalize src to float32 in [0.0, 1.0]
+    # Normalize src to float32 in [0.0, 1.0] (or keep the gain-map scale)
     if is_uint8:
         p = src.astype(np.float32) / 255.0
+    elif is_gain:
+        p = src.astype(np.float32)
     else:
         p = src.astype(np.float32)
         if float(np.max(p)) > 1.5:
@@ -225,6 +244,9 @@ def fast_guided_filter(
     if is_uint8:
         return np.clip(np.rint(q * 255.0), 0.0, 255.0).astype(np.uint8)
     else:
+        if is_gain:
+            ceiling = max(1.0, float(np.max(src)))
+            return np.clip(q, 0.0, ceiling).astype(src.dtype)
         if float(np.max(src)) > 1.5:
             return np.clip(q * 255.0, 0.0, 255.0).astype(src.dtype)
         return np.clip(q, 0.0, 1.0).astype(src.dtype)

@@ -1,6 +1,7 @@
 """Configuration structures, diagnostic types, and presets for PureScale 4.0."""
 
-from dataclasses import dataclass, field
+from copy import deepcopy
+from dataclasses import MISSING, dataclass, field, fields
 from enum import Enum
 from typing import Any, Dict, Optional, Tuple
 import numpy as np
@@ -64,6 +65,15 @@ class DeviceTarget(str, Enum):
     CUDA_GPU = "cuda"          # NVIDIA CUDA execution provider (falls back to CPU)
     CPU = "cpu"                # Pure CPU execution (Zen 4 AVX-512 / AVX2 vector SIMD)
     OPENCV_DNN = "opencv"      # Built-in OpenCV DNN module (zero external dependencies)
+
+
+def _library_default(f) -> Any:
+    """Dataclass field default (or default-factory product) for precedence tracking."""
+    if f.default is not MISSING:
+        return f.default
+    if f.default_factory is not MISSING:
+        return f.default_factory()
+    return None
 
 
 @dataclass
@@ -155,8 +165,32 @@ class PipelineConfig:
     output_format: str = "PNG"
 
     def __post_init__(self) -> None:
-        """Validates configuration parameters."""
+        """Validates configuration parameters and seeds explicit-field tracking."""
+        object.__setattr__(self, "_explicit_fields", set())
         self.validate()
+        # Constructor kwargs are explicit user choices. Post-construction
+        # mutations (CLI flags, preset overlays, auto-tune) are recorded by
+        # __setattr__; constructor values are recorded here by diffing against
+        # library defaults, so style profiles honor the documented precedence
+        # (explicit values always win; see apply_style_profile). A constructor
+        # value that exactly equals its default is indistinguishable from an
+        # omitted one: assign such a field after construction (e.g.
+        # ``cfg.sharpen_strength = 1.1``) to guarantee it wins.
+        for f in fields(self):
+            if getattr(self, f.name) != _library_default(f):
+                self._explicit_fields.add(f.name)
+        object.__setattr__(self, "_tracking", True)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        """Records post-construction field mutations for style-profile precedence."""
+        if getattr(self, "_tracking", False) and name in type(self).__dataclass_fields__:
+            self._explicit_fields.add(name)
+        object.__setattr__(self, name, value)
+
+    @property
+    def explicit_fields(self) -> frozenset:
+        """Fields explicitly set after construction (flags, presets, auto-tune)."""
+        return frozenset(self._explicit_fields)
 
     def validate(self) -> None:
         """Validates all configuration parameters against documented ranges.
@@ -312,12 +346,11 @@ def apply_style_profile(cfg: "PipelineConfig") -> "PipelineConfig":
     """Returns a copy of ``cfg`` with the resolved style profile applied.
 
     Resolution: explicit ``style_profile`` wins, else ``sr_style``. Profile
-    values fill only DSP fields still equal to library defaults, so explicit
-    values (CLI flags, presets, constructor kwargs, auto-tune results)
-    always win. Unknown profile names raise ``ValueError``.
+    values fill only DSP fields still at library defaults. Explicit user
+    choices always win: fields assigned after construction (CLI flags,
+    preset overlays, auto-tune results) or given as constructor kwargs are
+    never overridden by a profile. Unknown profile names raise ``ValueError``.
     """
-    from copy import deepcopy
-
     profile_name = cfg.style_profile if cfg.style_profile is not None else cfg.sr_style
     key = str(profile_name).lower()
     if key not in STYLE_PROFILES:
@@ -329,7 +362,15 @@ def apply_style_profile(cfg: "PipelineConfig") -> "PipelineConfig":
         return cfg
     defaults = PipelineConfig()
     out = deepcopy(cfg)
+    explicit = getattr(out, "_explicit_fields", None)
     for field_name, value in profile.items():
+        if explicit and field_name in explicit:
+            # Documented contract: explicit values (flags, presets,
+            # constructor kwargs, auto-tune results) always win. The old
+            # default-equality heuristic could not tell "explicitly set to
+            # the default value" from "never touched" and silently discarded
+            # such choices.
+            continue
         if getattr(out, field_name) == getattr(defaults, field_name):
             setattr(out, field_name, value)
     out.validate()
@@ -799,7 +840,7 @@ def get_preset_config(preset_name: str, base_config: Optional[PipelineConfig] = 
         ValueError: If ``preset_name`` is not a known preset. Use
             ``sorted(PRESETS)`` to list valid names.
     """
-    cfg = PipelineConfig() if base_config is None else PipelineConfig(**base_config.to_dict())
+    cfg = PipelineConfig() if base_config is None else deepcopy(base_config)
     key = preset_name.lower().strip()
     if key not in PRESETS:
         raise ValueError(f"Unknown preset: {preset_name!r}. Available: {sorted(PRESETS)}")
