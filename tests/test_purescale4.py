@@ -585,7 +585,7 @@ class TestPureScale4Pipeline(unittest.TestCase):
 
         first = run_full()
         diffs = []
-        for i in range(2):
+        for i in range(7):
             again = run_full()
             if not np.array_equal(first, again):
                 ys, xs, ch = np.where(first != again)
@@ -594,6 +594,25 @@ class TestPureScale4Pipeline(unittest.TestCase):
                              f"({first[ys[0], xs[0], ch[0]]} vs {again[ys[0], xs[0], ch[0]]})")
         for d in diffs:
             print("[DETERMINISM]", d)
+
+        # Portrait/YuNet probe: DNN inference on a noise image — suspected
+        # source of the cross-run 1-LSB border diffs.
+        from purescale.neural.portrait import detect_and_enhance_portrait
+
+        portrait_stats = []
+        p_first, p_faces0 = detect_and_enhance_portrait(img, portrait_smooth=35, eye_clarity=1.3)
+        portrait_stats.append(p_faces0)
+        p_flips = 0
+        for _ in range(7):
+            p_again, p_faces = detect_and_enhance_portrait(img, portrait_smooth=35, eye_clarity=1.3)
+            portrait_stats.append(p_faces)
+            if not np.array_equal(p_first, p_again):
+                p_flips += 1
+                ys, xs, ch = np.where(p_first != p_again)
+                print(f"[DETERMINISM] portrait differs on rerun: {len(ys)} px, first y={ys[0]} x={xs[0]}")
+        print(f"[DETERMINISM] portrait faces_detected per run: {portrait_stats}, output flips: {p_flips}/7")
+        if p_flips:
+            diffs.append(f"portrait: {p_flips}/7 reruns differ (faces per run: {portrait_stats})")
 
         masks_fn = lambda: tuple(map(np.asarray, vars(extract_semantic_masks(img)).values()))  # noqa: E731
         probes = [
