@@ -1,9 +1,15 @@
 """Automated verification test suite for PureScale 4.0 Advanced Computer Vision."""
 
+import hashlib
 import math
 import os
 import sys
+import tempfile
+import time
 import unittest
+
+from unittest.mock import patch
+
 import numpy as np
 import cv2
 
@@ -2307,6 +2313,286 @@ class TestPureScale4IoValidation(unittest.TestCase):
             np.full((16, 16, 3), 128, dtype=np.uint8), config=PipelineConfig(scale=1.0)
         )
         self.assertFalse(res2.is_grayscale)
+
+
+class TestPureScale4NeuralRobustness(unittest.TestCase):
+    """Download hardening, locking, graceful degradation, and neural input contracts."""
+
+    _TINY_SHA = hashlib.sha256(b"12345678").hexdigest()
+
+    @staticmethod
+    def _tiny_registry():
+        from purescale.neural import models as models_mod
+
+        models_mod.MODEL_REGISTRY["test-tiny"] = {
+            "filename": "test_tiny.onnx",
+            "url": "http://example.invalid/test_tiny.onnx",
+            "size_bytes": 8,
+            "sha256": TestPureScale4NeuralRobustness._TINY_SHA,
+            "scale": 4,
+            "task": "super-resolution",
+            "style": "photo",
+            "license": "test",
+            "description": "tiny hermetic test entry",
+        }
+        return models_mod
+
+    class _FakeResp:
+        def __init__(self, payload: bytes):
+            self._payload = payload
+            self._pos = 0
+            self.headers = {"Content-Length": str(len(payload))}
+
+        def read(self, n: int = -1) -> bytes:
+            if self._pos >= len(self._payload):
+                return b""
+            chunk = self._payload[self._pos:self._pos + n]
+            self._pos += len(chunk)
+            return chunk
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def test_download_retries_then_succeeds(self):
+        import urllib.error
+
+        from purescale.neural.models import ModelManager
+
+        models_mod = self._tiny_registry()
+        try:
+            calls = []
+            seen_progress = []
+
+            def fake_urlopen(req, timeout=30):
+                calls.append(req)
+                if len(calls) < 3:
+                    raise urllib.error.URLError("transient")
+                return self._FakeResp(b"12345678")
+
+            with tempfile.TemporaryDirectory() as d:
+                mgr = ModelManager(models_dir=d)
+                with patch("urllib.request.urlopen", fake_urlopen), \
+                        patch.object(models_mod.time, "sleep", lambda s: None):
+                    path = mgr.get_model_path(
+                        "test-tiny",
+                        progress_callback=lambda done, total: seen_progress.append((done, total)),
+                    )
+                self.assertTrue(os.path.exists(path))
+                with open(path, "rb") as fp:
+                    self.assertEqual(fp.read(), b"12345678")
+                self.assertEqual(len(calls), 3)  # two transient failures, then success
+                self.assertIn((8, 8), seen_progress)
+                litter = [f for f in os.listdir(d) if f.endswith((".download", ".lock"))]
+                self.assertEqual(litter, [])
+        finally:
+            models_mod.MODEL_REGISTRY.pop("test-tiny", None)
+
+    def test_download_bad_digest_never_caches(self):
+        from purescale.neural.models import ModelManager
+
+        models_mod = self._tiny_registry()
+        try:
+            def fake_urlopen(req, timeout=30):
+                return self._FakeResp(b"87654321")  # correct size, wrong content
+
+            with tempfile.TemporaryDirectory() as d:
+                mgr = ModelManager(models_dir=d)
+                with patch("urllib.request.urlopen", fake_urlopen), \
+                        patch.object(models_mod.time, "sleep", lambda s: None):
+                    with self.assertRaises(RuntimeError) as ctx:
+                        mgr.get_model_path("test-tiny")
+                self.assertIn("SHA256", str(ctx.exception))
+                self.assertFalse(os.path.exists(os.path.join(d, "test_tiny.onnx")))
+                # The corrupt payload must never have become the canonical file.
+                litter = [f for f in os.listdir(d) if f.endswith((".download", ".lock"))]
+                self.assertEqual(litter, [])
+        finally:
+            models_mod.MODEL_REGISTRY.pop("test-tiny", None)
+
+    def test_download_size_mismatch(self):
+        from purescale.neural.models import ModelManager
+
+        models_mod = self._tiny_registry()
+        try:
+            def fake_urlopen(req, timeout=30):
+                return self._FakeResp(b"12345")  # truncated
+
+            with tempfile.TemporaryDirectory() as d:
+                mgr = ModelManager(models_dir=d)
+                with patch("urllib.request.urlopen", fake_urlopen), \
+                        patch.object(models_mod.time, "sleep", lambda s: None):
+                    with self.assertRaises(RuntimeError) as ctx:
+                        mgr.get_model_path("test-tiny")
+                self.assertIn("size mismatch", str(ctx.exception))
+                self.assertFalse(os.path.exists(os.path.join(d, "test_tiny.onnx")))
+        finally:
+            models_mod.MODEL_REGISTRY.pop("test-tiny", None)
+
+    def test_lock_timeout_reports_concurrent_download(self):
+        from purescale.neural.models import ModelManager
+
+        models_mod = self._tiny_registry()
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                lock = os.path.join(d, "test_tiny.onnx.lock")
+                with open(lock, "w") as fp:
+                    fp.write("999")
+                mgr = ModelManager(models_dir=d)
+                with patch.object(models_mod, "_LOCK_TIMEOUT_S", 0.15), \
+                        patch.object(models_mod, "_LOCK_POLL_INTERVAL_S", 0.01):
+                    with self.assertRaises(RuntimeError) as ctx:
+                        mgr.get_model_path("test-tiny")
+                self.assertIn("Timed out", str(ctx.exception))
+        finally:
+            models_mod.MODEL_REGISTRY.pop("test-tiny", None)
+
+    def test_lock_stale_is_stolen(self):
+        from purescale.neural.models import ModelManager
+
+        models_mod = self._tiny_registry()
+        try:
+            def fake_urlopen(req, timeout=30):
+                return self._FakeResp(b"12345678")
+
+            with tempfile.TemporaryDirectory() as d:
+                lock = os.path.join(d, "test_tiny.onnx.lock")
+                with open(lock, "w") as fp:
+                    fp.write("999")
+                old = time.time() - 700.0
+                os.utime(lock, (old, old))  # dead process: lock predates stale window
+                mgr = ModelManager(models_dir=d)
+                with patch("urllib.request.urlopen", fake_urlopen), \
+                        patch.object(models_mod.time, "sleep", lambda s: None):
+                    path = mgr.get_model_path("test-tiny")
+                self.assertTrue(os.path.exists(path))
+                self.assertFalse(os.path.exists(lock))
+        finally:
+            models_mod.MODEL_REGISTRY.pop("test-tiny", None)
+
+    def test_download_callback_exception_propagates(self):
+        from purescale.neural.models import ModelManager
+
+        models_mod = self._tiny_registry()
+        try:
+            def fake_urlopen(req, timeout=30):
+                return self._FakeResp(b"12345678")
+
+            def bad_callback(done, total):
+                raise ValueError("callback bug")
+
+            with tempfile.TemporaryDirectory() as d:
+                mgr = ModelManager(models_dir=d)
+                with patch("urllib.request.urlopen", fake_urlopen), \
+                        patch.object(models_mod.time, "sleep", lambda s: None):
+                    # A progress-callback bug must surface as itself, not as a
+                    # misleading "Failed to download" error.
+                    with self.assertRaises(ValueError) as ctx:
+                        mgr.get_model_path("test-tiny", progress_callback=bad_callback)
+                self.assertIn("callback bug", str(ctx.exception))
+        finally:
+            models_mod.MODEL_REGISTRY.pop("test-tiny", None)
+
+    def test_portrait_offline_degrades_gracefully(self):
+        import io
+        from contextlib import redirect_stderr
+
+        import purescale.pipeline as pipe_mod
+
+        class BoomRetoucher:
+            def __init__(self):
+                raise RuntimeError("model download failed (offline)")
+
+        pipeline = pipe_mod.PureScalePipeline()
+        orig = pipe_mod.PortraitRetoucher
+        pipe_mod.PortraitRetoucher = BoomRetoucher
+        buf = io.StringIO()
+        try:
+            with redirect_stderr(buf):
+                res = pipeline.enhance(
+                    np.full((32, 32, 3), 128, dtype=np.uint8),
+                    config=PipelineConfig(scale=1.0),
+                )
+        finally:
+            pipe_mod.PortraitRetoucher = orig
+        self.assertEqual(res.faces_detected, 0)
+        self.assertIn("Portrait retouch unavailable", buf.getvalue())
+
+    def test_neural_mode_falls_back_to_easu(self):
+        import io
+        from contextlib import redirect_stderr
+
+        import purescale.pipeline as pipe_mod
+
+        class BoomEngine:
+            def __init__(self, *args, **kwargs):
+                raise RuntimeError("no model available")
+
+        pipeline = pipe_mod.PureScalePipeline()
+        orig = pipe_mod.NeuralSuperResEngine
+        pipe_mod.NeuralSuperResEngine = BoomEngine
+        buf = io.StringIO()
+        try:
+            with redirect_stderr(buf):
+                res = pipeline.enhance(
+                    np.full((32, 32, 3), 128, dtype=np.uint8),
+                    config=PipelineConfig(
+                        mode=ProcessingMode.NEURAL_AI, scale=2.0, enable_diagnostics=False,
+                    ),
+                )
+        finally:
+            pipe_mod.NeuralSuperResEngine = orig
+        self.assertEqual(res.image.shape, (64, 64, 3))
+        self.assertEqual(res.backend_name, "EASU DSP (neural fallback)")
+        self.assertIn("falling back to EASU", buf.getvalue())
+
+    def test_neural_oom_guard_accounts_for_4x_intermediate(self):
+        pipeline = PureScalePipeline()
+        # 8x8 input: orig 64 px and dest 256 px fit the 0.5k-px guard, but the
+        # full 4x intermediate (1024 px) does not — without fast-2x this used
+        # to slip through both guards and blow up inside tiled inference.
+        cfg = PipelineConfig(
+            mode=ProcessingMode.NEURAL_AI, scale=2.0,
+            enable_fast_2x=False, max_megapixels=0.0005,
+        )
+        with self.assertRaises(ValueError) as ctx:
+            pipeline.enhance(np.zeros((8, 8, 3), dtype=np.uint8), config=cfg)
+        self.assertIn("fast-2x", str(ctx.exception))
+        self.assertIn("intermediate", str(ctx.exception))
+
+    def _cpu_engine(self):
+        from purescale.neural.engine import NeuralSuperResEngine
+        from purescale.neural.models import get_default_model_path
+
+        path = get_default_model_path(auto_download=False)
+        if path is None:
+            self.skipTest("Neural super-resolution model weights not downloaded locally.")
+        return NeuralSuperResEngine(model_path=path, target_device=DeviceTarget.CPU)
+
+    def test_engine_rejects_non_uint8(self):
+        engine = self._cpu_engine()
+        with self.assertRaises(ValueError) as ctx:
+            engine.upscale(np.zeros((8, 8, 3), dtype=np.float32), target_scale=2.0)
+        self.assertIn("uint8", str(ctx.exception))
+
+    def test_engine_native_scale_override(self):
+        from purescale.neural.engine import NeuralSuperResEngine
+        from purescale.neural.models import get_default_model_path
+
+        path = get_default_model_path(auto_download=False)
+        if path is None:
+            self.skipTest("Neural super-resolution model weights not downloaded locally.")
+        engine = NeuralSuperResEngine(model_path=path, target_device=DeviceTarget.CPU, native_scale=2)
+        self.assertEqual(engine.native_scale, 2)
+
+    def test_backend_name_reflects_session_providers(self):
+        engine = self._cpu_engine()
+        # The name comes from the providers the session actually loaded; in a
+        # CPU-only environment a requested accelerator must not be reported
+        # as "DirectML GPU".
+        self.assertIn("CPU", engine.backend_name)
 
 
 if __name__ == "__main__":

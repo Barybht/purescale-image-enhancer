@@ -6,6 +6,7 @@ and Hybrid Neural Edge Synthesis.
 """
 
 import copy
+import sys
 import time
 from typing import Callable, Dict, Optional, Tuple
 import cv2
@@ -246,12 +247,21 @@ class PureScalePipeline:
             return cur, 0
         report(progress_label, progress_ratio)
         t0 = time.perf_counter()
-        retoucher = self._get_portrait_retoucher()
-        cur, faces_detected = retoucher.enhance(
-            cur,
-            portrait_smooth=cfg.portrait_smooth,
-            eye_clarity=cfg.eye_clarity,
-        )
+        try:
+            retoucher = self._get_portrait_retoucher()
+            cur, faces_detected = retoucher.enhance(
+                cur,
+                portrait_smooth=cfg.portrait_smooth,
+                eye_clarity=cfg.eye_clarity,
+            )
+        except (OSError, RuntimeError, ValueError, cv2.error, MemoryError) as err:
+            # Portrait retouch is an optional stage: an offline YuNet download
+            # or a detector runtime error must not abort the whole run.
+            print(
+                f"[WARNING] Portrait retouch unavailable ({err}); continuing without it.",
+                file=sys.stderr,
+            )
+            cur, faces_detected = cur, 0
         stage_latencies["portrait_retouch"] = (time.perf_counter() - t0) * 1000.0
         return cur, faces_detected
 
@@ -307,18 +317,31 @@ class PureScalePipeline:
     ) -> Tuple[np.ndarray, Optional[np.ndarray], str]:
         report(progress_label, progress_ratio)
         t0 = time.perf_counter()
-        engine = self._get_neural_engine(cfg.device, cfg.scale, style=cfg.sr_style)
-        cur = engine.upscale(
-            cur,
-            target_scale=cfg.scale,
-            tile_size=cfg.tile_size,
-            tile_overlap=cfg.tile_overlap,
-            fast_2x=cfg.enable_fast_2x,
-        )
+        try:
+            engine = self._get_neural_engine(cfg.device, cfg.scale, style=cfg.sr_style)
+            cur = engine.upscale(
+                cur,
+                target_scale=cfg.scale,
+                tile_size=cfg.tile_size,
+                tile_overlap=cfg.tile_overlap,
+                fast_2x=cfg.enable_fast_2x,
+            )
+            backend = engine.backend_name
+        except (OSError, RuntimeError, ValueError, cv2.error, MemoryError) as err:
+            # Offline / model-failure fallback: NEURAL mode without a model
+            # used to abort the whole run. Degrade to EASU interpolation with
+            # a loud warning instead (backend_name reports it honestly).
+            print(
+                f"[WARNING] Neural super-resolution unavailable ({err}); "
+                "falling back to EASU interpolation for this run.",
+                file=sys.stderr,
+            )
+            cur = edge_adaptive_upsample(cur, scale=cfg.scale)
+            backend = "EASU DSP (neural fallback)"
         if alpha is not None:
             alpha = cv2.resize(alpha, (dest_w, dest_h), interpolation=cv2.INTER_LANCZOS4)
         stage_latencies["neural_superres"] = (time.perf_counter() - t0) * 1000.0
-        return cur, alpha, engine.backend_name
+        return cur, alpha, backend
 
     def enhance(
         self,
@@ -393,6 +416,7 @@ class PureScalePipeline:
         orig_h, orig_w = cur.shape[:2]
         dest_w = int(round(orig_w * cfg.scale))
         dest_h = int(round(orig_h * cfg.scale))
+        mode = cfg.mode if isinstance(cfg.mode, ProcessingMode) else ProcessingMode(cfg.mode)
 
         max_allowed_pixels = int(cfg.max_megapixels * 1_000_000)
         orig_pixels = orig_w * orig_h
@@ -410,7 +434,22 @@ class PureScalePipeline:
                 f"Increase max_megapixels or reduce scale to prevent out-of-memory."
             )
 
-        mode = cfg.mode if isinstance(cfg.mode, ProcessingMode) else ProcessingMode(cfg.mode)
+        # Neural-mode memory accounting: without --fast-2x, a target_scale
+        # below the native 4x still runs FULL 4x tiled inference first, so the
+        # real intermediate is 16x the input pixels — and tile_process keeps
+        # output-sized float32 accumulators (~16 bytes/output px). The plain
+        # orig/dest guards above never saw that intermediate.
+        if mode in (ProcessingMode.NEURAL_AI, ProcessingMode.HYBRID) and not cfg.enable_fast_2x:
+            native_scale = 4  # the registry ships x4 super-resolution models only
+            if cfg.scale < native_scale:
+                interp_pixels = orig_pixels * native_scale * native_scale
+                if interp_pixels > max_allowed_pixels:
+                    raise ValueError(
+                        f"Neural pipeline at {cfg.scale}x runs full {native_scale}x inference before "
+                        f"downsampling ({interp_pixels / 1e6:.2f} MP intermediate), exceeding the "
+                        f"{cfg.max_megapixels:.1f} MP guard. Enable --fast-2x (pre-downscale before "
+                        f"{native_scale}x inference) or reduce the input resolution / raise max_megapixels."
+                    )
 
         def report(stage_name: str, ratio: float) -> None:
             if progress_callback:
