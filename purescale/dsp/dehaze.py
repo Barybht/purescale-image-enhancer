@@ -9,7 +9,7 @@ from typing import Tuple
 import cv2
 import numpy as np
 
-from purescale.dsp.semantic import fast_guided_filter
+from purescale.dsp.filters import fast_guided_filter
 
 
 def compute_dark_channel(img_norm: np.ndarray, patch_radius: int = 7) -> np.ndarray:

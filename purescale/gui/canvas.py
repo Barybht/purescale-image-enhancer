@@ -38,6 +38,17 @@ class InteractiveCanvas(tk.Canvas):
         self._tk_img: Optional[ImageTk.PhotoImage] = None
         self._redraw_after: Optional[str] = None
 
+        # Display-size resizes, cached across redraws. Redraw fires on every
+        # divider-drag and pan frame; without the cache each frame re-runs
+        # PIL LANCZOS/BILINEAR over multi-megapixel sources (hundreds of ms
+        # on a 28 MP split view — divider drags feel broken). Keys include
+        # the PIL object identity and the exact resize parameters, so a hit
+        # is always the same pixels the uncached path would have produced.
+        # Entries hold a strong reference to the source PIL image, which
+        # prevents id() reuse from ever producing a stale hit; set_images
+        # clears the cache when the displayed images change.
+        self._disp_cache: dict = {}
+
         # Bind event handlers
         self.bind("<Configure>", self._on_resize)
         self.bind("<ButtonPress-1>", self._on_drag_start)
@@ -68,6 +79,10 @@ class InteractiveCanvas(tk.Canvas):
 
         self.orig_pil = orig
         self.enh_pil = enh
+        # New displayed images invalidate every cached resize (entries may
+        # also simply fall out via their identity key, but keeping the cache
+        # bounded starts here).
+        self._disp_cache.clear()
 
         # A brand new source image is being loaded if orig is provided and either:
         # - there was no previous image
@@ -331,6 +346,24 @@ class InteractiveCanvas(tk.Canvas):
             return Image.Resampling.NEAREST
         return Image.Resampling.BILINEAR
 
+    def _display_image(self, pil: Image.Image, disp_w: int, disp_h: int, resample) -> Image.Image:
+        """Returns ``pil`` resized to display size, memoized across redraws.
+
+        Same pixels as an uncached ``pil.resize(...)`` — the key is the source
+        image identity plus the exact target size and resampling filter.
+        """
+        key = (id(pil), disp_w, disp_h, resample)
+        entry = self._disp_cache.get(key)
+        if entry is not None and entry[0] is pil:
+            return entry[1]
+        resized = pil.resize((disp_w, disp_h), resample)
+        if len(self._disp_cache) >= 4:
+            self._disp_cache.clear()
+        # Strong reference to the source alongside the resize: keeps the id()
+        # in the key from being reused by a different image while cached.
+        self._disp_cache[key] = (pil, resized)
+        return resized
+
     def redraw(self) -> None:
         """Composites and renders active view mode."""
         self.delete("all")
@@ -373,15 +406,16 @@ class InteractiveCanvas(tk.Canvas):
         if self.view_mode != "split" or self.orig_pil is None or self.enh_pil is None:
             active_pil = self._active_ref_image()
             if active_pil is not None:
-                resized = active_pil.resize((disp_w, disp_h), resample)
+                resized = self._display_image(active_pil, disp_w, disp_h, resample)
                 self._tk_img = ImageTk.PhotoImage(resized)
                 self.create_image(x1, y1, anchor=tk.NW, image=self._tk_img)
             return
 
         # View Mode: Split Comparison
-        # Harmonize original to enhanced display geometry
-        enh_disp = self.enh_pil.resize((disp_w, disp_h), resample)
-        orig_disp = self.orig_pil.resize((disp_w, disp_h), resample)
+        # Harmonize original to enhanced display geometry (cached across
+        # divider-drag frames: pan/zoom unchanged -> pure paste work).
+        enh_disp = self._display_image(self.enh_pil, disp_w, disp_h, resample)
+        orig_disp = self._display_image(self.orig_pil, disp_w, disp_h, resample)
 
         divider_x = int(disp_w * self.split_pos)
 
