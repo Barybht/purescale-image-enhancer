@@ -408,6 +408,14 @@ class ProcessingResult:
     stage_latencies: Dict[str, float] = field(default_factory=dict)
 
 
+class PipelineCancelled(RuntimeError):
+    """Raised when a cooperative cancel hook trips during ``enhance()``.
+
+    Defined here (not in pipeline) so the neural engine and tiling worker can
+    raise it without importing the pipeline module (import cycle).
+    """
+
+
 PRESETS: Dict[str, Dict[str, Any]] = {
     "balanced": {
         "scale": 2.0,

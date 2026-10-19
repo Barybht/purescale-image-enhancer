@@ -2,6 +2,7 @@
 
 import logging
 import os
+import queue
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -18,6 +19,7 @@ from purescale.config import (
     PRESETS,
     DeviceTarget,
     DiagnosticsResult,
+    PipelineCancelled,
     PipelineConfig,
     ProcessingMode,
     ProcessingResult,
@@ -57,12 +59,22 @@ class PureScaleApp(ctk.CTk):
         self.current_icc_profile: Optional[bytes] = None
         self.current_file_path: Optional[str] = None
         self.current_diagnostics: Optional[DiagnosticsResult] = None
+        self.current_result_grayscale: bool = False
         self.is_processing: bool = False
+
+        # Worker -> UI marshalling: workers never touch Tk from their own
+        # thread (outside tkinter's thread contract); they post closures to
+        # this queue, drained on the main thread by a 50 ms poller.
+        self._ui_queue: "queue.Queue" = queue.Queue()
+        self._cancel_event = threading.Event()
+        self._diag_generation = 0
 
         self._detect_hardware()
         self._build_layout()
         self._bind_shortcuts()
         self._setup_drag_and_drop()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.after(50, self._drain_ui_queue)
 
     def _detect_hardware(self) -> None:
         """Determines active hardware acceleration device name."""
@@ -208,32 +220,35 @@ class PureScaleApp(ctk.CTk):
         self._populate_sidebar()
 
     def _bind_shortcuts(self) -> None:
-        """Binds studio keyboard shortcuts for rapid workflow."""
-        self.bind("<Control-o>", lambda e: self._open_file_dialog())
-        self.bind("<Control-O>", lambda e: self._open_file_dialog())
-        self.bind("<Control-s>", lambda e: self._save_file_dialog())
-        self.bind("<Control-S>", lambda e: self._save_file_dialog())
-        self.bind("<Control-e>", lambda e: self._start_enhancement_async())
-        self.bind("<Control-E>", lambda e: self._start_enhancement_async())
-        self.bind("<Control-a>", lambda e: self._on_auto_enhance_click())
-        self.bind("<Control-A>", lambda e: self._on_auto_enhance_click())
-        self.bind("<Control-r>", lambda e: self._on_reset_click())
-        self.bind("<Control-R>", lambda e: self._on_reset_click())
-
-        # Viewport controls
-        self.bind("<space>", lambda e: self._cycle_view_mode())
-        self.bind("<f>", lambda e: self.canvas.fit_to_window())
-        self.bind("<F>", lambda e: self.canvas.fit_to_window())
-        self.bind("<Key-1>", lambda e: self.canvas.zoom_100())
-        self.bind("<plus>", lambda e: self.canvas.zoom_step(1.15))
-        self.bind("<equal>", lambda e: self.canvas.zoom_step(1.15))
-        self.bind("<minus>", lambda e: self.canvas.zoom_step(0.85))
-        self.bind("<underscore>", lambda e: self.canvas.zoom_step(0.85))
-        self.bind("<KP_Add>", lambda e: self.canvas.zoom_step(1.15))
-        self.bind("<KP_Subtract>", lambda e: self.canvas.zoom_step(0.85))
-        self.bind("<KP_1>", lambda e: self.canvas.zoom_100())
-        self.bind("<r>", lambda e: self._on_reset_click())
-        self.bind("<R>", lambda e: self._on_reset_click())
+        """Binds studio keyboard shortcuts for rapid workflow (all guarded)."""
+        bindings = (
+            ("<Control-o>", self._open_file_dialog),
+            ("<Control-O>", self._open_file_dialog),
+            ("<Control-s>", self._save_file_dialog),
+            ("<Control-S>", self._save_file_dialog),
+            ("<Control-e>", self._start_enhancement_async),
+            ("<Control-E>", self._start_enhancement_async),
+            ("<Control-a>", self._on_auto_enhance_click),
+            ("<Control-A>", self._on_auto_enhance_click),
+            ("<Control-r>", self._on_reset_click),
+            ("<Control-R>", self._on_reset_click),
+            # Viewport controls
+            ("<space>", self._cycle_view_mode),
+            ("<f>", lambda: self.canvas.fit_to_window()),
+            ("<F>", lambda: self.canvas.fit_to_window()),
+            ("<Key-1>", lambda: self.canvas.zoom_100()),
+            ("<plus>", lambda: self.canvas.zoom_step(1.15)),
+            ("<equal>", lambda: self.canvas.zoom_step(1.15)),
+            ("<minus>", lambda: self.canvas.zoom_step(0.85)),
+            ("<underscore>", lambda: self.canvas.zoom_step(0.85)),
+            ("<KP_Add>", lambda: self.canvas.zoom_step(1.15)),
+            ("<KP_Subtract>", lambda: self.canvas.zoom_step(0.85)),
+            ("<KP_1>", lambda: self.canvas.zoom_100()),
+            ("<r>", self._on_reset_click),
+            ("<R>", self._on_reset_click),
+        )
+        for sequence, fn in bindings:
+            self.bind(sequence, self._guarded_shortcut(fn))
 
     def _setup_drag_and_drop(self) -> None:
         """Enables drag-and-drop file loading if supported by host environment."""
@@ -248,13 +263,122 @@ class PureScaleApp(ctk.CTk):
         if not files:
             return
         path = files[0]
-        if isinstance(path, bytes):
-            try:
-                path = path.decode("utf-8")
-            except UnicodeDecodeError:
-                path = path.decode("latin-1")
+        if isinstance(path, (bytes, bytearray)):
+            # windnd yields raw filesystem bytes; os.fsdecode picks the right
+            # filesystem codec (utf-8/latin-1 guessing mojibakes CJK/ANSI paths).
+            path = os.fsdecode(bytes(path))
         if os.path.isfile(path):
             self.load_image(path)
+
+    # -- worker -> UI marshalling ------------------------------------------------
+    def _post_ui(self, fn) -> None:
+        """Marshals a callable onto the main thread (thread-safe)."""
+        self._ui_queue.put(fn)
+
+    def _drain_ui_queue(self) -> None:
+        """Main-thread pump: executes closures posted by worker threads."""
+        try:
+            while True:
+                fn = self._ui_queue.get_nowait()
+                try:
+                    fn()
+                except Exception:
+                    logger.exception("UI queue handler failed")
+        except queue.Empty:
+            pass
+        try:
+            self.after(50, self._drain_ui_queue)
+        except (RuntimeError, tk.TclError):
+            pass  # window destroyed during shutdown
+
+    def _on_close(self) -> None:
+        """Confirm-and-cancel close protocol (default handler risks
+        Tcl_AsyncDelete crashes when a worker thread is mid-after())."""
+        if self.is_processing:
+            if not messagebox.askyesno(
+                "Job Running",
+                "An enhancement job is still running.\nQuit and cancel it?",
+            ):
+                return
+        self._cancel_event.set()
+        self.destroy()
+
+    def _typing_in_entry(self) -> bool:
+        """True when keyboard input is going to a text field.
+
+        Two cases: an open preset popup (its filter entry has a modal grab),
+        or keyboard focus inside any text-entry widget. Single-key shortcuts
+        like 'r'/'f'/'+' must not fire in either state.
+        """
+        try:
+            if getattr(self.preset_opt, "is_open", lambda: False)():
+                return True
+        except (AttributeError, RuntimeError, tk.TclError):
+            pass
+        try:
+            focus = self.focus_get()
+        except (KeyError, RuntimeError, tk.TclError):
+            return False
+        return isinstance(focus, tk.Entry) or type(focus).__name__ in ("CTkEntry", "CTkTextbox")
+
+    def _guarded_shortcut(self, fn):
+        """Wraps a shortcut action with the processing/typing guards."""
+
+        def handler(_event=None):
+            if self.is_processing:
+                return  # buttons are disabled; shortcuts respect that too
+            if self._typing_in_entry():
+                return
+            return fn()
+
+        return handler
+
+    # -- job lifecycle ------------------------------------------------------------
+    _PARAM_WIDGET_NAMES = (
+        "mode_seg", "style_seg", "auto_style_switch", "diagnostics_switch",
+        "dehaze_switch", "dehaze_slider", "pyramid_switch", "pyramid_detail_slider",
+        "pyramid_struct_slider", "pyramid_dynrange_slider", "semantic_switch",
+        "scale_slider", "cas_slider", "denoise_switch", "denoise_slider",
+        "contrast_switch", "contrast_slider", "bright_slider", "local_tone_switch",
+        "tone_strength_slider", "hl_recovery_slider", "shadow_boost_slider",
+        "vibrance_slider", "temp_slider", "tint_slider", "depixel_slider",
+        "deblur_slider", "smooth_slider", "eye_slider", "fast_2x_switch", "fmt_seg",
+    )
+
+    def _set_params_enabled(self, enabled: bool) -> None:
+        """Greys out (and restores) the inspector parameter widgets during a job.
+
+        The running job uses a frozen config snapshot; disabled live widgets
+        make that visible instead of letting edits silently do nothing.
+        """
+        state = "normal" if enabled else "disabled"
+        for name in self._PARAM_WIDGET_NAMES:
+            widget = getattr(self, name, None)
+            if widget is None:
+                continue
+            try:
+                widget.configure(state=state)
+            except (tk.TclError, AttributeError, ValueError):
+                pass
+
+    def _finish_job(self) -> None:
+        """Common post-job UI reset (complete / error / cancelled paths)."""
+        self.is_processing = False
+        self._cancel_event.clear()
+        self.btn_cancel.configure(state="disabled")
+        self.btn_enhance.configure(state="normal", text="Enhance Image")
+        self.btn_auto.configure(state="normal")
+        self._set_params_enabled(True)
+        try:
+            self._on_mode_change(self.mode_seg.get())  # re-derive mode-dependent enables
+        except (tk.TclError, AttributeError):
+            pass
+
+    def _on_cancel_click(self) -> None:
+        """Requests cooperative cancellation of the running job."""
+        self._cancel_event.set()
+        self.btn_cancel.configure(state="disabled")
+        self.status_label.configure(text="Cancelling after the current stage...")
 
     def _cycle_view_mode(self) -> None:
         """Cycles through view modes: Original -> Enhanced -> Split View -> Original."""
@@ -302,6 +426,18 @@ class PureScaleApp(ctk.CTk):
             active_frame.pack(fill="x")
 
         self.update_idletasks()
+        # Kill any in-flight wheel animation first, otherwise _smooth_step
+        # fights the reset and drags the view back toward the old target.
+        try:
+            self.sidebar._smooth_target = None
+            if self.sidebar._smooth_after_id is not None:
+                try:
+                    self.sidebar.after_cancel(self.sidebar._smooth_after_id)
+                except (ValueError, RuntimeError, tk.TclError):
+                    pass
+                self.sidebar._smooth_after_id = None
+        except (AttributeError, RuntimeError, tk.TclError):
+            pass
         try:
             self.sidebar._parent_canvas.yview_moveto(0.0)
         except (AttributeError, tk.TclError):
@@ -357,6 +493,18 @@ class PureScaleApp(ctk.CTk):
             height=32,
         )
         self.btn_save.pack(fill="x", pady=2)
+
+        self.btn_cancel = ctk.CTkButton(
+            btn_frame,
+            text="Cancel Job",
+            command=self._on_cancel_click,
+            fg_color=PALETTE["err"],
+            hover_color=PALETTE["err"],
+            font=font("ui12b"),
+            height=30,
+        )
+        self.btn_cancel.pack(fill="x", pady=(0, 2))
+        self.btn_cancel.configure(state="disabled")
 
         # Categorized Inspector Tab Switcher
         self.tab_seg = ctk.CTkSegmentedButton(
@@ -860,19 +1008,36 @@ class PureScaleApp(ctk.CTk):
             self._sync_routed_style(self.current_diagnostics)
 
     def _run_quick_diagnostics_async(self, bgr: np.ndarray) -> None:
-        """Runs fast diagnostic signal analysis and updates HUD."""
+        """Runs fast diagnostic signal analysis and updates the HUD.
+
+        Generation-tokened: each call bumps the generation, and only the
+        newest run may touch the HUD/state — a slow analysis of a previously
+        loaded image can never overwrite the current one's results. The
+        auto-style switch is read on the main thread (Tkinter variable reads
+        are not thread-safe).
+        """
+        self._diag_generation += 1
+        gen = self._diag_generation
+        auto_style_on = bool(self.auto_style_switch.get())
+
         def diag_worker():
             try:
                 sem = extract_semantic_masks(bgr)
                 diag = diagnose_image(bgr, semantic_breakdown=sem.breakdown)
-                self.current_diagnostics = diag
-                self.after(0, lambda d=diag: self.hud_card.update_diagnostics(d))
-                if self.auto_style_switch.get():
-                    self.after(0, lambda d=diag: self._sync_routed_style(d))
+                self._post_ui(lambda: self._on_diagnostics_ready(gen, diag, auto_style_on))
             except (cv2.error, ValueError, TypeError, RuntimeError) as e:
                 logger.warning("Quick diagnostics background analysis failed: %s", e)
 
         threading.Thread(target=diag_worker, daemon=True).start()
+
+    def _on_diagnostics_ready(self, gen: int, diag: DiagnosticsResult, auto_style_on: bool) -> None:
+        """Main-thread landing for the diagnostics worker; stale runs are dropped."""
+        if gen != self._diag_generation:
+            return  # a newer image was loaded meanwhile: these results are stale
+        self.current_diagnostics = diag
+        self.hud_card.update_diagnostics(diag)
+        if auto_style_on:
+            self._sync_routed_style(diag)
 
     def _on_reset_click(self) -> None:
         """Resets all configuration sliders and preset to Balanced baseline."""
@@ -897,6 +1062,13 @@ class PureScaleApp(ctk.CTk):
 
     def load_image(self, path: str) -> bool:
         """Loads an image into the application session, resetting viewport and parameters."""
+        if self.is_processing:
+            # Loading mid-job mixed the old job's result with the new image's
+            # state (split view showing one image's original and another's
+            # result; saves wrote old pixels with new metadata).
+            self.status_label.configure(text="Busy: wait for the current job or cancel it.")
+            return False
+        self.configure(cursor="watch")
         try:
             from purescale.cli import load_image_with_alpha
             bgr, alpha, exif, icc = load_image_with_alpha(path, return_meta=True)
@@ -906,6 +1078,7 @@ class PureScaleApp(ctk.CTk):
             self.current_exif = exif
             self.current_icc_profile = icc
             self.current_enh_bgr = None
+            self.current_result_grayscale = False
             self.current_diagnostics = None
             self.hud_card.update_diagnostics(None)
 
@@ -913,6 +1086,9 @@ class PureScaleApp(ctk.CTk):
             self.view_mode_seg.set("Original")
             self.canvas.set_view_mode("original")
             self.split_ctrl_frame.pack_forget()
+            # The previous image's divider position must not carry over.
+            self.canvas.set_split_pos(0.5, notify=False)
+            self.split_slider.set(0.5)
 
             # Reset parameters & preset to clean baseline for the new picture
             self.preset_opt.set("Balanced")
@@ -933,6 +1109,8 @@ class PureScaleApp(ctk.CTk):
         except (OSError, IOError, ValueError, cv2.error) as err:
             messagebox.showerror("Image Load Error", f"Could not load image:\n{err}")
             return False
+        finally:
+            self.configure(cursor="")
 
     def _apply_diagnostics_to_ui(self, diag: DiagnosticsResult) -> None:
         """Synchronizes UI sliders with auto-tuned parameters."""
@@ -1066,25 +1244,42 @@ class PureScaleApp(ctk.CTk):
             pass
 
         self.is_processing = True
+        self._cancel_event.clear()
         self.btn_enhance.configure(state="disabled", text="Processing...")
         self.btn_auto.configure(state="disabled")
+        self.btn_cancel.configure(state="normal")
+        self._set_params_enabled(False)
         self.progress_bar.set(0.05)
         self.status_label.configure(text="Enhancement in progress...")
+
+        # Freeze the inputs on the main thread: a worker reading shared state
+        # while the user loads another image used to mix old results with new
+        # state (split view showing one image's original and another's result).
+        bgr = self.current_orig_bgr
+        alpha = self.current_alpha
+        cancel_check = self._cancel_event.is_set
 
         def worker():
             try:
                 def on_progress(stage: str, ratio: float):
-                    self.after(0, lambda s=stage, r=ratio: self._update_progress(s, r))
+                    self._post_ui(lambda s=stage, r=ratio: self._update_progress(s, r))
 
                 res = self.pipeline.enhance(
-                    self.current_orig_bgr,
+                    bgr,
                     config=cfg,
-                    alpha=self.current_alpha,
+                    alpha=alpha,
                     progress_callback=on_progress,
+                    cancel_check=cancel_check,
                 )
-                self.after(0, lambda r=res: self._on_enhancement_complete(r))
-            except (cv2.error, RuntimeError, ValueError, MemoryError, OSError) as err:
-                self.after(0, lambda e=err: self._on_enhancement_error(e))
+                self._post_ui(lambda r=res: self._on_enhancement_complete(r))
+            except PipelineCancelled:
+                self._post_ui(self._on_enhancement_cancelled)
+            except Exception as err:
+                # Broad catch on purpose: any unhandled exception type used to
+                # escape the thread silently, leaving is_processing=True and
+                # both buttons disabled forever (bricked app).
+                logger.exception("Enhancement worker failed")
+                self._post_ui(lambda e=err: self._on_enhancement_error(e))
 
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
@@ -1118,11 +1313,10 @@ class PureScaleApp(ctk.CTk):
                 self.style_seg.set("Photo")
 
     def _on_enhancement_complete(self, res: ProcessingResult) -> None:
-        self.is_processing = False
-        self.btn_enhance.configure(state="normal", text="Enhance Image")
-        self.btn_auto.configure(state="normal")
+        self._finish_job()
         self.progress_bar.set(1.0)
         self.current_enh_bgr = res.image
+        self.current_result_grayscale = res.is_grayscale
 
         if res.diagnostics:
             self.current_diagnostics = res.diagnostics
@@ -1156,17 +1350,23 @@ class PureScaleApp(ctk.CTk):
         # progress bar (failures still raise an error dialog).
 
     def _on_enhancement_error(self, err: Exception) -> None:
-        self.is_processing = False
-        self.btn_enhance.configure(state="normal", text="Enhance Image")
-        self.btn_auto.configure(state="normal")
+        self._finish_job()
         self.progress_bar.set(0.0)
         self.status_label.configure(text=f"Error: {err}")
         messagebox.showerror("Enhancement Error", f"Processing failed:\n{err}")
+
+    def _on_enhancement_cancelled(self) -> None:
+        self._finish_job()
+        self.progress_bar.set(0.0)
+        self.status_label.configure(text="Cancelled.")
 
     def _save_file_dialog(self) -> None:
         """Prompts user to save enhanced image."""
         if self.current_enh_bgr is None:
             messagebox.showwarning("No Result", "No enhanced image available to save.")
+            return
+        if self.is_processing:
+            self.status_label.configure(text="Busy: wait for the current job or cancel it.")
             return
 
         fmt = self.fmt_seg.get()
@@ -1191,15 +1391,25 @@ class PureScaleApp(ctk.CTk):
         if not dest_path:
             return
 
+        # The dialog lists every format but the encoder follows fmt_seg;
+        # force the configured extension so "JPEG" in the dialog can't write
+        # PNG bytes under a .jpg name (or vice versa).
+        root_name = os.path.splitext(dest_path)[0]
+        dest_path = root_name + ext
+
+        self.configure(cursor="watch")
         try:
             from purescale.cli import save_image_with_alpha
             save_image_with_alpha(
                 self.current_enh_bgr, self.current_alpha, dest_path, fmt,
                 exif=self.current_exif, icc_profile=self.current_icc_profile,
+                preserve_gray=self.current_result_grayscale,
             )
             self.status_label.configure(text=f"Saved: {os.path.basename(dest_path)}")
         except (OSError, IOError, ValueError, cv2.error) as err:
             messagebox.showerror("Save Error", f"Could not save file:\n{err}")
+        finally:
+            self.configure(cursor="")
 
 
 def launch_gui() -> None:

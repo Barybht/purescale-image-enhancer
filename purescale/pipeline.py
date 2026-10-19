@@ -16,6 +16,7 @@ from purescale.config import (
     AUTO_STYLE_CONFIDENCE,
     DeviceTarget,
     DiagnosticsResult,
+    PipelineCancelled,
     PipelineConfig,
     ProcessingMode,
     ProcessingResult,
@@ -349,6 +350,7 @@ class PureScalePipeline:
         config: Optional[PipelineConfig] = None,
         alpha: Optional[np.ndarray] = None,
         progress_callback: Optional[Callable[[str, float], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
     ) -> ProcessingResult:
         """
         Executes enhancement across configured mode with PureScale 4.0 computer vision.
@@ -452,6 +454,10 @@ class PureScalePipeline:
                     )
 
         def report(stage_name: str, ratio: float) -> None:
+            # Cooperative cancellation between stages (checked at every stage
+            # boundary; ratio >= 1.0 is the final report, never a cancel point).
+            if cancel_check is not None and ratio < 1.0 and cancel_check():
+                raise PipelineCancelled(f"Cancelled before stage: {stage_name}")
             if progress_callback:
                 progress_callback(stage_name, ratio)
 

@@ -246,6 +246,9 @@ class InteractiveCanvas(tk.Canvas):
         dy = event.y - self.drag_start_y
         if abs(dx) > 1 or abs(dy) > 1:
             self.is_fit_mode = False
+            # Leaving fit mode changes the label basis; refresh the header
+            # immediately (it used to go stale until the next zoom action).
+            self._notify_zoom_change()
         self.drag_start_x = event.x
         self.drag_start_y = event.y
         self.pan_x += dx

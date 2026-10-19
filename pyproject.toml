@@ -43,6 +43,7 @@ gui = [
     "customtkinter>=5.2.0",
     "onnxruntime-directml>=1.16.0; sys_platform == 'win32'",
     "onnxruntime>=1.16.0; sys_platform != 'win32'",
+    "windnd>=1.0.2; sys_platform == 'win32'",
 ]
 
 [project.urls]

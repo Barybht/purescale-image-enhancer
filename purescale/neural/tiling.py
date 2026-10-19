@@ -1,8 +1,10 @@
 """Overlap patch tiling for bounded memory neural inference on arbitrary resolution."""
 
-from typing import Callable, Tuple
+from typing import Callable, Optional, Tuple
 import cv2
 import numpy as np
+
+from purescale.config import PipelineCancelled
 
 
 def _make_1d_feather(length: int, overlap: int, at_start: bool, at_end: bool) -> np.ndarray:
@@ -34,6 +36,7 @@ def tile_process(
     scale: int = 4,
     tile_size: int = 256,
     overlap: int = 32,
+    cancel_check: Optional[Callable[[], bool]] = None,
 ) -> np.ndarray:
     """
     Processes image in overlapping spatial tiles with continuous raised-cosine blending.
@@ -48,6 +51,8 @@ def tile_process(
     Args:
         img: Input image array [H, W], [H, W, 3], or [H, W, 4]
         process_fn: Function that takes BGR patch and returns upscaled patch
+        cancel_check: Optional cooperative-cancellation hook, consulted before
+            each tile; trips raise ``PipelineCancelled``.
         scale: Resolution multiplier of process_fn (e.g., 4)
         tile_size: Size of square tile in input pixels
         overlap: Overlap margin in input pixels
@@ -89,6 +94,8 @@ def tile_process(
     x_steps = list(range(0, w, stride))
 
     for y in y_steps:
+        if cancel_check is not None and cancel_check():
+            raise PipelineCancelled("Cancelled during tiled inference")
         for x in x_steps:
             # Determine tile bounding box on input with overlap
             y1 = max(0, y - overlap)

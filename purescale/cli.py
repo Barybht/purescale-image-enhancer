@@ -142,20 +142,34 @@ def save_image_with_alpha(
 
 
 def process_file(pipeline: PureScalePipeline, cfg: PipelineConfig, in_path: str, out_path: str,
-                 quiet: bool = False, reference: Optional[np.ndarray] = None) -> Optional[Dict[str, Any]]:
+                 quiet: bool = False, reference: Optional[np.ndarray] = None,
+                 show_progress: bool = False) -> Optional[Dict[str, Any]]:
     """Processes a single file. Returns result dict on success, None on failure.
 
     When ``reference`` (uint8 BGR) is supplied, PSNR/SSIM vs the enhanced
     output are added under ``"quality"`` if shapes match, otherwise a
     ``"quality_error"`` string is recorded instead of failing the run.
+
+    ``show_progress`` prints one line per pipeline stage (heartbeat): large
+    photos can process for tens of seconds, and a silent console looks
+    exactly like a hang.
     """
     try:
         bgr, alpha, exif, icc = load_image_with_alpha(in_path, return_meta=True)
         h, w = bgr.shape[:2]
 
-        res = pipeline.enhance(bgr, config=cfg, alpha=alpha)
+        def _heartbeat(stage: str, ratio: float) -> None:
+            if show_progress and ratio < 1.0:  # 1.0 is "Complete"; [SUCCESS] follows
+                print(f"  -> {stage}", flush=True)
+
+        res = pipeline.enhance(
+            bgr, config=cfg, alpha=alpha,
+            progress_callback=_heartbeat if show_progress else None,
+        )
 
         out_h, out_w = res.image.shape[:2]
+        if show_progress:
+            print(f"  -> Encoding {cfg.output_format} ({out_w * out_h / 1e6:.1f} MP)...", flush=True)
         save_image_with_alpha(
             res.image, res.alpha, out_path, cfg.output_format,
             exif=exif, icc_profile=icc, preserve_gray=res.is_grayscale,
@@ -374,6 +388,11 @@ def _apply_flags(cfg: PipelineConfig, parsed: argparse.Namespace) -> None:
 
 def main(args: List[str] = None) -> int:
     """CLI entrypoint."""
+    if args is None:
+        # Script/console-script entry: sys.argv[1:] is the arg list. Without
+        # this normalization the "compare" subcommand was never dispatched
+        # (main(None) skipped the dispatch and the main parser choked).
+        args = sys.argv[1:]
     if args and args[0] == "compare":
         return main_compare(args[1:])
     parser = argparse.ArgumentParser(
@@ -585,7 +604,11 @@ def main(args: List[str] = None) -> int:
             base_name = os.path.splitext(os.path.basename(in_path))[0]
             out_path = os.path.join(os.path.dirname(in_path), f"{base_name}_enhanced{target_ext}")
 
-        result = process_file(pipeline, cfg, in_path, out_path, quiet=quiet, reference=reference_bgr)
+        result = process_file(
+            pipeline, cfg, in_path, out_path,
+            quiet=quiet, reference=reference_bgr,
+            show_progress=not quiet,  # per-stage heartbeat: long runs must not look frozen
+        )
         if parsed.json:
             print(json.dumps(_json_safe(result if result is not None else {"input": in_path, "error": "failed"})))
         return 0 if result is not None else 1
