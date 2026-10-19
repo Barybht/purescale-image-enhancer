@@ -37,6 +37,7 @@ from purescale.dsp.diagnostics import (
     diagnose_image,
     estimate_atmospheric_haze,
     estimate_chroma_wavelet_noise_mad,
+    estimate_dynamic_range_entropy,
     estimate_jpeg_blocking,
     estimate_optical_blur,
     estimate_shades_of_gray_illuminant,
@@ -54,8 +55,8 @@ from purescale.dsp.pyramid import (
 from purescale.dsp.semantic import (
     compute_spatial_guidance_maps,
     extract_semantic_masks,
-    fast_guided_filter,
 )
+from purescale.dsp.filters import fast_guided_filter, fast_guided_filter_pair
 from purescale.dsp.dehaze import atmospheric_dehaze, compute_dark_channel
 from purescale.dsp.restore import (
     directional_subpixel_depixelate,
@@ -214,6 +215,81 @@ class TestPureScale4Diagnostics(unittest.TestCase):
         self.assertGreater(int(mag_adapted[16, 16, 2]), 128) # Red boosted
         self.assertLess(int(mag_adapted[16, 16, 1]), 128)    # Green attenuated
 
+    def test_crop_proxy_passes_small_inputs_and_crops_large(self):
+        # M1: the pixel-scale estimators bound cost with a center crop.
+        # Inputs at/below the cap must pass through untouched (identity, not
+        # a copy), so every bench/golden-sized input behaves exactly as before.
+        from purescale.dsp.diagnostics import _crop_for_estimation
+
+        small = np.zeros((800, 600), dtype=np.uint8)
+        self.assertIs(_crop_for_estimation(small), small)
+        square = np.zeros((1024, 1024), dtype=np.uint8)
+        self.assertIs(_crop_for_estimation(square), square)
+
+        big = np.zeros((2200, 3200), dtype=np.uint8)
+        big[500:1700, 800:2400] = 7
+        crop = _crop_for_estimation(big)
+        self.assertEqual(crop.shape, (1024, 1024))
+        # Centered: a distinctive fill in the middle must survive the crop.
+        self.assertTrue(np.all(crop == 7), "center crop must contain the image center")
+
+    def test_large_noisy_image_noise_estimate_not_suppressed_by_crop(self):
+        # M1 regression guard on the DOWNSCALE alternative: had the proxy been
+        # an INTER_AREA resize, each output pixel would average ~dozens of
+        # source pixels and the measured sigma would collapse toward "Clean"
+        # on large inputs. The full-resolution crop must preserve the noise
+        # signal.
+        np.random.seed(5)
+        noisy = np.clip(128 + np.random.normal(0, 12.0, (2048, 1536)), 0, 255).astype(np.uint8)
+        sigma, cat = estimate_wavelet_noise_mad(noisy)
+        self.assertGreaterEqual(sigma, 9.0, "crop proxy lost the luma noise signal")
+        self.assertIn(cat, ("Moderate", "Heavy"))
+
+        # Small-input path still reads the same sigma on the same generator.
+        sigma_small, _ = estimate_wavelet_noise_mad(noisy[384:1408, 512:1536])
+        self.assertAlmostEqual(sigma, sigma_small, delta=2.0)
+
+    def test_large_sharp_image_not_falsely_blurred_by_crop(self):
+        # Same guard for the blur estimator: downscaling would soften fine
+        # texture into a false "Blurred" score; the crop keeps pixel-scale
+        # acutance, so a sharply textured large image stays "Sharp".
+        xs = np.arange(2048, dtype=np.float32)
+        ys = np.arange(2048, dtype=np.float32)[:, None]
+        checker = (((xs // 4) + (ys // 4)) % 2 * 170 + 40).astype(np.uint8)
+        score, cat = estimate_optical_blur(checker)
+        self.assertLess(score, 0.25)
+        self.assertEqual(cat, "Sharp")
+
+    def test_entropy_percentiles_bitwise_match_numpy(self):
+        # The O(256) histogram order-statistic path must be bitwise-equal to
+        # np.percentile's linear interpolation on the full array (including
+        # sizes whose percentile index lands near integer boundaries), because
+        # dynamic_range feeds auto-tune thresholds.
+        import cv2 as _cv2
+
+        rng = np.random.default_rng(0)
+        shapes = [(240, 320), (480, 640), (720, 1280), (97, 101), (2, 3), (1, 1),
+                  (1, 76800), (1, 76799), (1, 76801), (5, 5), (2200, 3200)]
+        for (h, w) in shapes:
+            img = rng.integers(0, 256, (h, w), dtype=np.uint8)
+            entropy, dyn_range, shadow, highlight, mean_lum = estimate_dynamic_range_entropy(img)
+
+            hist = _cv2.calcHist([img], [0], None, [256], [0, 256]).ravel()
+            prob = hist / (float(img.size) + 1e-12)
+            prob_nz = prob[prob > 0]
+            ref_entropy = -float(np.sum(prob_nz * np.log2(prob_nz)))
+            p1 = float(np.percentile(img, 1))
+            p99 = float(np.percentile(img, 99))
+            ref_range = int(round(p99 - p1))
+            ref_shadow = float(np.sum(img < 5)) / img.size * 100.0
+            ref_highlight = float(np.sum(img > 250)) / img.size * 100.0
+
+            self.assertEqual(entropy, round(ref_entropy, 2), msg=f"entropy mismatch at {(h, w)}")
+            self.assertEqual(dyn_range, ref_range, msg=f"p99-p1 mismatch at {(h, w)}")
+            self.assertEqual(shadow, round(ref_shadow, 2), msg=f"shadow mismatch at {(h, w)}")
+            self.assertEqual(highlight, round(ref_highlight, 2), msg=f"highlight mismatch at {(h, w)}")
+            self.assertEqual(mean_lum, round(float(np.mean(img)), 1), msg=f"mean mismatch at {(h, w)}")
+
 
 
 class TestPureScale4Pyramids(unittest.TestCase):
@@ -341,6 +417,59 @@ class TestPureScale4SemanticAndDehaze(unittest.TestCase):
         _, denoise = compute_spatial_guidance_maps(masks, guide=guide)
         self.assertGreater(float(denoise.max()), 1.55)
         self.assertGreaterEqual(float(denoise.min()), 0.40)
+
+    def test_guided_filter_pair_bitwise_equal_to_two_single_calls(self):
+        # Phase 5: compute_spatial_guidance_maps filters two maps with one
+        # guide; the shared-statistics pair variant must be bitwise-equal to
+        # two fast_guided_filter calls, or downstream blends would shift.
+        rng = np.random.default_rng(3)
+        for (h, w) in [(64, 80), (63, 47), (33, 33)]:
+            guide = rng.integers(0, 256, (h, w), dtype=np.uint8)
+            a = np.clip(rng.normal(1.0, 0.25, (h, w)), 0.15, 1.45).astype(np.float32)
+            b = np.clip(rng.normal(1.0, 0.25, (h, w)), 0.40, 1.85).astype(np.float32)
+            pa, pb = fast_guided_filter_pair(guide, a, b, radius=6, eps=1e-3, subsample=2, value_range="gain")
+            ea = fast_guided_filter(guide, a, radius=6, eps=1e-3, subsample=2, value_range="gain")
+            eb = fast_guided_filter(guide, b, radius=6, eps=1e-3, subsample=2, value_range="gain")
+            self.assertTrue(np.array_equal(pa, ea), msg=f"detail map drift at {(h, w)}")
+            self.assertTrue(np.array_equal(pb, eb), msg=f"denoise map drift at {(h, w)}")
+            self.assertEqual(pa.dtype, np.float32)
+
+        # uint8 sources ride the same ladder (auto value range).
+        guide = rng.integers(0, 256, (50, 70), dtype=np.uint8)
+        a8 = rng.integers(0, 256, (50, 70), dtype=np.uint8)
+        b8 = rng.integers(0, 256, (50, 70), dtype=np.uint8)
+        qa, qb = fast_guided_filter_pair(guide, a8, b8, radius=6, eps=1e-3, subsample=2)
+        self.assertTrue(np.array_equal(qa, fast_guided_filter(guide, a8, radius=6, eps=1e-3, subsample=2)))
+        self.assertTrue(np.array_equal(qb, fast_guided_filter(guide, b8, radius=6, eps=1e-3, subsample=2)))
+
+        # Mixed dtype classes can't share the guide statistics safely: the
+        # guide-downscale interpolation follows the source dtype.
+        with self.assertRaises(ValueError):
+            fast_guided_filter_pair(guide, a8, np.zeros((50, 70), np.float32))
+        with self.assertRaises(ValueError):
+            fast_guided_filter_pair(guide, np.zeros((50, 70), np.float32), b8)
+        with self.assertRaises(ValueError):
+            fast_guided_filter_pair(guide, a8, b8, value_range="bogus")
+
+    def test_guidance_maps_deterministic_through_pair_path(self):
+        # End-to-end sameness of the semantic stage after switching to the
+        # shared-guide pair: same shapes, same scale headroom, deterministic.
+        rng = np.random.default_rng(9)
+        img = np.full((96, 128, 3), 140.0)
+        img[:32] = (200, 160, 90)
+        img[40:60, 20:100] = (60, 140, 60)
+        img += rng.normal(0, 9.0, img.shape)
+        img = np.clip(img, 0, 255).astype(np.uint8)
+        masks = extract_semantic_masks(img)
+        guide = np.array(rng.integers(0, 256, (96, 128)), dtype=np.uint8)
+        detail, denoise = compute_spatial_guidance_maps(masks, guide=guide)
+        self.assertEqual(detail.shape, (96, 128))
+        self.assertEqual(denoise.shape, (96, 128))
+        self.assertGreaterEqual(float(detail.min()), 0.14)
+        self.assertGreaterEqual(float(denoise.min()), 0.39)
+        detail2, denoise2 = compute_spatial_guidance_maps(masks, guide=guide)
+        self.assertTrue(np.array_equal(detail, detail2))
+        self.assertTrue(np.array_equal(denoise, denoise2))
 
 
 class TestPureScale4SideWindowFilter(unittest.TestCase):
@@ -1348,6 +1477,55 @@ class TestPureScale4GuiCanvas(unittest.TestCase):
         canvas._on_resize(None)
         self.assertFalse(canvas.is_fit_mode)
         self.assertAlmostEqual(canvas.zoom_level, saved_zoom, delta=0.001)
+
+    def test_canvas_display_cache_reuse_and_invalidation(self):
+        # Phase 5 (M5): redraws fire on every divider-drag and pan frame.
+        # Cached display resizes must make repeat redraws resize-free; new
+        # displayed images must invalidate the cache.
+        import unittest.mock as mock
+
+        from PIL import Image
+        from purescale.gui.canvas import InteractiveCanvas
+
+        canvas = InteractiveCanvas(self.root, width=800, height=600)
+        canvas.pack(fill="both", expand=True)
+        self.root.update_idletasks()
+        canvas.view_mode = "split"
+
+        orig = Image.new("RGB", (600, 400), color=(90, 90, 90))
+        enh = Image.new("RGB", (600, 400), color=(160, 160, 170))
+        canvas.set_images(orig, enh)  # warms the display cache outside the counting block
+
+        real_resize = Image.Image.resize
+        calls = {"n": 0}
+
+        def counting_resize(pil_self, size, *args, **kwargs):
+            calls["n"] += 1
+            return real_resize(pil_self, size, *args, **kwargs)
+
+        with mock.patch.object(Image.Image, "resize", counting_resize):
+            canvas.redraw()
+            canvas.redraw()
+            self.assertEqual(calls["n"], 0, "repeat redraws must hit the cache")
+
+            # Divider drag changes only split_pos: display resizes unchanged.
+            canvas.set_split_pos(0.75, notify=False)
+            self.assertEqual(calls["n"], 0)
+
+            canvas._disp_cache.clear()
+            canvas.redraw()
+            cold_after_clear = calls["n"]
+            self.assertEqual(cold_after_clear, 2, "cold redraw resizes orig + enh once")
+            canvas.redraw()
+            self.assertEqual(calls["n"], cold_after_clear)
+
+            # New images invalidate every cached resize: set_images fires its
+            # own fit+redraw, which must resize both images from scratch.
+            orig2 = Image.new("RGB", (600, 400), color=(10, 10, 10))
+            canvas.set_images(orig2, enh)
+            self.assertEqual(calls["n"], cold_after_clear + 2, "invalidation forces fresh resizes")
+            canvas.redraw()
+            self.assertEqual(calls["n"], cold_after_clear + 2, "subsequent redraws re-hit the fresh cache")
 
 
 class TestPureScale4MemoryGuard(unittest.TestCase):

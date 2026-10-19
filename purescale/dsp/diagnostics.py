@@ -10,6 +10,35 @@ from typing import Any, Dict, Optional, Tuple
 import cv2
 import numpy as np
 
+# Long-edge cap for the pixel-scale estimators (luma MAD, optical blur).
+# Beyond this, estimation runs on a full-resolution CENTER CROP — see
+# _crop_for_estimation() for why a crop (not a downscale) is the faithful proxy.
+_MAX_ESTIMATE_DIM = 1024
+
+
+def _crop_for_estimation(img: np.ndarray, max_dim: int = _MAX_ESTIMATE_DIM) -> np.ndarray:
+    """Bounds estimator cost on large inputs without changing the statistic's scale.
+
+    Returns the input unchanged when its long edge is at or below ``max_dim``.
+    Larger inputs are reduced to a centered ``max_dim`` crop at FULL
+    resolution. This is deliberate: noise sigma (Haar HH1 MAD) and blur
+    (Laplacian energy, edge acutance) are pixel-scale measures — downsampling
+    with INTER_AREA would average the noise away and soften edges,
+    systematically reading large photos as "Clean" and "Blurred". A
+    full-resolution crop preserves those statistics; for typical photos
+    (uniform noise/sharpness across the frame) it matches the full-frame
+    estimate within sampling error. Inputs at or below the cap — every
+    bench/golden fixture — pass through bit-identically.
+    """
+    h, w = img.shape[:2]
+    if max(h, w) <= max_dim:
+        return img
+    ch = min(h, max_dim)
+    cw = min(w, max_dim)
+    y0 = (h - ch) // 2
+    x0 = (w - cw) // 2
+    return img[y0:y0 + ch, x0:x0 + cw]
+
 
 @dataclass
 class DiagnosticsResult:
@@ -115,10 +144,19 @@ def estimate_wavelet_noise_mad(img_gray: np.ndarray) -> Tuple[float, str]:
             scale (the category thresholds below are expressed in gray
             levels; a [0, 1]-scaled float input would always read "Clean").
 
+    Performance:
+        Inputs whose long edge exceeds 1024 px are estimated on a centered
+        1024 px crop at full resolution (see ``_crop_for_estimation``) —
+        downsampling would suppress exactly the noise this estimator
+        measures. Smaller inputs are analyzed in full, unchanged.
+
     Returns:
         Tuple of (sigma_estimate, category_string)
     """
-    gray = img_gray.astype(np.float32)
+    if img_gray is None or img_gray.size == 0:
+        return 0.0, "Clean"
+
+    gray = _crop_for_estimation(img_gray).astype(np.float32)
     h, w = gray.shape[:2]
     if h < 2 or w < 2:
         # Too small for a 2x2 Haar decomposition: median over an empty HH1
@@ -236,13 +274,20 @@ def estimate_optical_blur(img_gray: np.ndarray) -> Tuple[float, str]:
             scale (the variance threshold below assumes that scale; a
             [0, 1]-scaled float input would always read "Blurred").
 
+    Performance:
+        Inputs whose long edge exceeds 1024 px are estimated on a centered
+        1024 px crop at full resolution (see ``_crop_for_estimation``):
+        Laplacian energy and edge acutance are pixel-scale measures that
+        downsampling would soften into a false "Blurred" reading. Smaller
+        inputs are analyzed in full, unchanged.
+
     Returns:
         Tuple of (blur_score, category_string)
     """
     if img_gray is None or img_gray.size == 0:
         return 0.0, "Sharp"
 
-    gray = img_gray.astype(np.float32)
+    gray = _crop_for_estimation(img_gray).astype(np.float32)
     h, w = gray.shape[:2]
     if h < 4 or w < 4:
         return 0.0, "Sharp"
@@ -308,9 +353,31 @@ def estimate_dynamic_range_entropy(img_gray: np.ndarray) -> Tuple[float, int, fl
     prob_nonzero = prob[prob > 0]
     entropy = -float(np.sum(prob_nonzero * np.log2(prob_nonzero)))
 
-    # Percentiles for robust dynamic range
-    p1 = float(np.percentile(gray, 1))
-    p99 = float(np.percentile(gray, 99))
+    # Robust dynamic range via exact order statistics read off the cumulative
+    # histogram. Bitwise-equal to np.percentile(gray, q) with linear
+    # interpolation (for integer-valued data the k-th order statistic is the
+    # smallest level v with cum[v] >= k+1), at O(256) instead of two partial
+    # sorts over the whole image (~100 ms each at 7 MP).
+    # float64 accumulation: calcHist yields float32, whose 24-bit mantissa
+    # would round cumulative counts on images above ~16.7 MP.
+    cum = np.cumsum(hist, dtype=np.float64)
+    n = int(gray.size)
+
+    def _order_stat(k: int) -> int:
+        # 0-indexed k-th smallest gray level.
+        return int(np.searchsorted(cum, k + 1, side="left"))
+
+    def _percentile(q: float) -> float:
+        pos = (n - 1) * (q / 100.0)
+        lo = int(np.floor(pos))
+        hi = min(lo + 1, n - 1)
+        frac = pos - lo
+        v_lo = _order_stat(lo)
+        v_hi = _order_stat(hi)
+        return v_lo + (v_hi - v_lo) * frac
+
+    p1 = _percentile(1.0)
+    p99 = _percentile(99.0)
     dynamic_range = int(round(p99 - p1))
 
     # Clipping statistics

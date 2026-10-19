@@ -2,7 +2,7 @@
 
 import cv2
 import numpy as np
-from typing import Optional
+from typing import Optional, Tuple
 
 
 def side_window_filter(img: np.ndarray, radius: int = 2, iterations: int = 1,
@@ -250,3 +250,139 @@ def fast_guided_filter(
         if float(np.max(src)) > 1.5:
             return np.clip(q * 255.0, 0.0, 255.0).astype(src.dtype)
         return np.clip(q, 0.0, 1.0).astype(src.dtype)
+
+
+def fast_guided_filter_pair(
+    guide: np.ndarray,
+    src_a: np.ndarray,
+    src_b: np.ndarray,
+    radius: int = 8,
+    eps: float = 1e-3,
+    subsample: int = 4,
+    value_range: str = "auto",
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Filters two source maps with the same guidance image, sharing guide statistics.
+
+    ``fast_guided_filter`` recomputes the guide normalization and statistics
+    (guide box filters for mean and variance) on every call. When one guide
+    filters several maps — the semantic detail/denoise gain maps do — those
+    statistics are identical every time. This variant computes them once and
+    emits both filtered maps; per-source math is op-for-op the same as
+    ``fast_guided_filter``, so the outputs are bitwise equal to calling it
+    twice (at roughly two-thirds the cost).
+
+    Both sources must have the same dtype class (both uint8 or both float):
+    the guide-downscale interpolation follows the source dtype, so mixed
+    calls would not share guide statistics. ``value_range`` applies to BOTH
+    sources (the semantic gain maps share the "gain" contract). See
+    ``fast_guided_filter`` for parameter meanings.
+
+    Raises:
+        ValueError: invalid ``value_range``, or sources of mixed dtype classes.
+    """
+    if value_range not in ("auto", "gain"):
+        raise ValueError(f"Invalid value_range: {value_range!r}. Must be 'auto' or 'gain'.")
+    if (src_a.dtype == np.uint8) != (src_b.dtype == np.uint8):
+        raise ValueError(
+            "fast_guided_filter_pair requires both sources to be uint8 or both float "
+            f"(got {src_a.dtype} and {src_b.dtype}); guide statistics would not be shared."
+        )
+    if radius <= 0:
+        return src_a.copy(), src_b.copy()
+
+    h, w = guide.shape[:2]
+    if h == 0 or w == 0:
+        return src_a.copy(), src_b.copy()
+
+    is_uint8 = (src_a.dtype == np.uint8)
+    is_gain = (value_range == "gain")
+
+    # Normalize guide to float32 in [0.0, 1.0]
+    if guide.dtype == np.uint8:
+        g = guide.astype(np.float32) / 255.0
+    else:
+        g = guide.astype(np.float32)
+        if float(np.max(g)) > 1.5:
+            g = g / 255.0
+
+    s = max(1, subsample)
+    small_size = (max(1, w // s), max(1, h // s))
+
+    if s > 1:
+        # Same interpolation choice as fast_guided_filter (follows the SOURCE
+        # dtype contract, see the ValueError above).
+        g_sub = cv2.resize(g, small_size, interpolation=cv2.INTER_AREA if is_uint8 else cv2.INTER_NEAREST)
+    else:
+        g_sub = g
+
+    r_sub = max(1, radius // s)
+    ksize = (2 * r_sub + 1, 2 * r_sub + 1)
+
+    # Shared guide statistics (identical ops to fast_guided_filter).
+    mean_g = cv2.boxFilter(g_sub, cv2.CV_32F, ksize)
+    var_g = cv2.boxFilter(g_sub * g_sub, cv2.CV_32F, ksize) - mean_g * mean_g
+
+    results = []
+    for src in (src_a, src_b):
+        # Normalize src to float32 in [0.0, 1.0] (or keep the gain-map scale)
+        if is_uint8:
+            p = src.astype(np.float32) / 255.0
+        elif is_gain:
+            p = src.astype(np.float32)
+        else:
+            p = src.astype(np.float32)
+            if float(np.max(p)) > 1.5:
+                p = p / 255.0
+
+        if s > 1:
+            p_sub = cv2.resize(p, small_size, interpolation=cv2.INTER_AREA if is_uint8 else cv2.INTER_NEAREST)
+        else:
+            p_sub = p
+
+        # Broadcast branches exactly mirror fast_guided_filter (they depend
+        # on the per-source p_sub dimensionality, not on the guide alone).
+        if g_sub.ndim == 2 and p_sub.ndim == 3:
+            g_sub_corr = g_sub[:, :, np.newaxis]
+            mean_g_b = mean_g[:, :, np.newaxis]
+            var_g_b = var_g[:, :, np.newaxis]
+        else:
+            g_sub_corr = g_sub
+            mean_g_b = mean_g
+            var_g_b = var_g
+
+        mean_p = cv2.boxFilter(p_sub, cv2.CV_32F, ksize)
+        corr_gp = cv2.boxFilter(g_sub_corr * p_sub, cv2.CV_32F, ksize)
+
+        a = (corr_gp - mean_g_b * mean_p) / (var_g_b + eps)
+        b = mean_p - a * mean_g_b
+
+        mean_a = cv2.boxFilter(a, cv2.CV_32F, ksize)
+        mean_b = cv2.boxFilter(b, cv2.CV_32F, ksize)
+
+        if s > 1:
+            mean_a_up = cv2.resize(mean_a, (w, h), interpolation=cv2.INTER_LINEAR)
+            mean_b_up = cv2.resize(mean_b, (w, h), interpolation=cv2.INTER_LINEAR)
+        else:
+            mean_a_up = mean_a
+            mean_b_up = mean_b
+
+        if g.ndim == 2 and p.ndim == 3:
+            g_full = g[:, :, np.newaxis]
+        else:
+            g_full = g
+
+        q = mean_a_up * g_full + mean_b_up
+
+        if is_uint8:
+            results.append(np.clip(np.rint(q * 255.0), 0.0, 255.0).astype(np.uint8))
+        else:
+            if is_gain:
+                ceiling = max(1.0, float(np.max(src)))
+                results.append(np.clip(q, 0.0, ceiling).astype(src.dtype))
+            elif float(np.max(src)) > 1.5:
+                results.append(np.clip(q * 255.0, 0.0, 255.0).astype(src.dtype))
+            else:
+                results.append(np.clip(q, 0.0, 1.0).astype(src.dtype))
+
+    return results[0], results[1]
