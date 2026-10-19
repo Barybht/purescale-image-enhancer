@@ -2702,6 +2702,8 @@ class TestPureScale4GuiStability(unittest.TestCase):
             )
 
     def test_worker_survives_arbitrary_exception(self):
+        import unittest.mock as mock
+
         app = self._make_app()
         try:
             app.current_orig_bgr = np.full((32, 32, 3), 128, dtype=np.uint8)
@@ -2711,9 +2713,13 @@ class TestPureScale4GuiStability(unittest.TestCase):
                 raise AttributeError("unexpected internal error")
 
             app.pipeline.enhance = boom
-            app._start_enhancement_async()
-            self.assertTrue(app.is_processing)
-            self._pump(app, until=lambda: not app.is_processing)
+            # Modal dialogs must never open in tests: on a headless CI session
+            # the error messagebox has nobody to click it and blocks the event
+            # pump forever (this exact pattern stalled all windows-latest legs).
+            with mock.patch("purescale.gui.app.messagebox.showerror"):
+                app._start_enhancement_async()
+                self.assertTrue(app.is_processing)
+                self._pump(app, until=lambda: not app.is_processing)
             self.assertFalse(app.is_processing, "worker exception must not brick the app")
             self.assertEqual(app.btn_enhance.cget("state"), "normal")
             self.assertIn("unexpected internal error", app.status_label.cget("text"))
