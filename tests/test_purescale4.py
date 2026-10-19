@@ -753,6 +753,41 @@ class TestPureScale4CliAndGui(unittest.TestCase):
             if os.path.exists(f):
                 os.remove(f)
 
+    def test_cli_compare_dispatch_from_sys_argv(self):
+        # Regression: the script entry calls main() with args=None; the
+        # compare dispatch was skipped, so `enhance_image.py compare a b`
+        # printed an argparse usage error instead of comparing.
+        import unittest.mock as mock
+
+        from purescale.cli import main
+
+        with mock.patch("sys.argv", ["enhance_image.py", "compare", self.temp_in, self.temp_in]):
+            code = main()
+        self.assertEqual(code, 0)
+
+    def test_cli_stage_progress_heartbeat(self):
+        # Regression: single-file runs printed nothing until completion —
+        # large photos processed for tens of seconds and looked frozen.
+        import io
+        from contextlib import redirect_stdout
+
+        from purescale.cli import main
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = main([self.temp_in, "-o", self.temp_out, "--scale", "1.0"])
+        self.assertEqual(code, 0)
+        out = buf.getvalue()
+        self.assertIn("-> Autonomous Signal Diagnostics", out)
+        self.assertIn("-> Encoding", out)
+
+        # --quiet (and --json) suppress the heartbeat; batch headers stay compact.
+        buf2 = io.StringIO()
+        with redirect_stdout(buf2):
+            code = main([self.temp_in, "-o", self.temp_out, "--scale", "1.0", "--quiet"])
+        self.assertEqual(code, 0)
+        self.assertNotIn("-> ", buf2.getvalue())
+
     def test_cli_diagnostics_flag(self):
         from purescale.cli import main
         code = main([self.temp_in, "--diagnostics"])
