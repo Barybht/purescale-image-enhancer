@@ -1,4 +1,10 @@
-"""Perceptual color vibrance (Oklab) and chromatic adaptation (Bradford CAT16)."""
+"""Perceptual color vibrance (Oklab) and chromatic adaptation (CAT02, "Bradford CAT16" branding).
+
+Honesty note on the adaptation stage: the cone-response matrix below is
+CAT02 (not Bradford, despite the historical function name kept for API
+stability), and the transform is a heuristic von Kries diagonal in that
+cone space rather than a full CAT16 / Bradford chromatic adaptation.
+"""
 
 from typing import Tuple
 import cv2
@@ -123,7 +129,7 @@ def oklab_vibrance(bgr: np.ndarray, boost: float = 1.1) -> np.ndarray:
 
 
 # CAT16 / CAT02 cone response matrix (Li et al., 2017 / CIE CAT16)
-# Used for Bradford-style von Kries chromatic adaptation in LMS cone space
+# Used for the CAT02 von Kries diagonal chromatic adaptation in LMS cone space
 _M_CAT = np.array([
     [0.7328, 0.4296, -0.1624],
     [-0.7036, 1.6975, 0.0061],
@@ -139,10 +145,15 @@ def bradford_cat16_white_balance(
     tint_offset: int = 0,
 ) -> np.ndarray:
     """
-    Bradford / CAT16 Chromatic Adaptation Transform.
-    Adjusts white balance color temperature and green/magenta tint in the LMS cone domain
-    using a 2D von Kries diagonal transform derived from the CAT16/CAT02 cone response matrix.
-    Preserves neutral black shadows and specular white highlights without color clipping.
+    White balance via von Kries diagonal adaptation in the CAT02 cone space
+    (function name kept for API stability).
+
+    Honesty note: the matrix is CAT02, not Bradford, and the transform is a
+    heuristic diagonal adaptation rather than a full CAT16 / Bradford CAT.
+    Adjusts white balance color temperature and green/magenta tint in the LMS
+    cone domain using a 2D von Kries diagonal transform on the CAT02 response
+    matrix. Preserves neutral black shadows and specular white highlights
+    without color clipping.
 
     Args:
         bgr: Input BGR image uint8 [H, W, 3]

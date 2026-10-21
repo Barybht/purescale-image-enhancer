@@ -1,0 +1,93 @@
+name: Release
+
+# Tag-triggered packaging: a push of a v* tag builds the sdist and wheel on
+# all three major platforms' wheels not required for a pure-Python package —
+# a single ubuntu build host is enough since there are no compiled
+# extensions. Artifacts are attached to the workflow run; the optional
+# publish job below is the PyPI fill-in.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build sdist + wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            artifact: dist-linux
+          - os: windows-latest
+            artifact: dist-windows
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Sanity — tests must pass before packaging
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest -r requirements-gui.txt
+          python -m pytest tests -q
+        # On Linux, GUI classes auto-skip without a display — packaging does
+        # not depend on them. Windows runs the full suite including GUI.
+
+      - name: Build distributions
+        run: |
+          python -m pip install build twine
+          python -m build
+          python -m twine check dist/*
+
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/*
+          retention-days: 30
+
+  publish:
+    name: Publish to PyPI (optional fill-in)
+    needs: build
+    runs-on: ubuntu-24.04
+    # OPT-IN PUBLISH: this job intentionally fails-fast in repositories that
+    # have not configured PyPI publishing. To enable it, add a repository
+    # variable HAVE_PYPI=true and either (a) a PYPI_API_TOKEN trusted
+    # publishing setup via an "pypi" environment, or (b) an API token secret
+    # PYPI_API_TOKEN. Until then the gate below keeps this job out of the
+    # way, and artifacts from the build job are the release deliverables.
+    if: ${{ vars.HAVE_PYPI == 'true' }}
+    environment: pypi
+    permissions:
+      # Trusted publishing (PyPI OIDC) needs id-token; token-based publishing
+      # is covered by the same job.
+      id-token: write
+      contents: read
+    steps:
+      - name: Collect all dist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: dist/
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # With trusted publishing configured, no repository secret is needed.
+        # For token-based publishing instead, uncomment:
+        # with:
+        #   password: ${{ secrets.PYPI_API_TOKEN }}

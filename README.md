@@ -53,7 +53,7 @@ PureScale 4.0 is an autonomous, multiscale computational vision and edge neural 
 | **Stage -0.5: Semantics** | Multi-Cue Region Parsing | Chromatic opponent signatures + Fast Guided Filter | Soft continuous masks for Sky, Foliage, Skin, Shadow, and Structure. |
 | **Stage 0: Conditioning** | Structure Tensor Shock Deblur & Anti-Aliasing | Second directional derivative $I_{\eta\eta}$ along isophotes | Reverses optical lens diffusion and removes pixel jaggies prior to scaling. |
 | **Stage 1: Dehazing** | Dark Channel Prior (DCP) | $J(x) = (I(x) - A) / \max(t(x), t_0) + A$ with Guided Filter | Removes atmospheric fog and smoke; restores deep landscape contrast. |
-| **Stage 2: Super-Res** | EASU (DSP) or Real-ESRGAN (AI) | Directional sinc reconstruction or 6-block CNN | Vector-sharp edges up to 4x scaling with overlap patch tiling (<300 MB RAM). |
+| **Stage 2: Super-Res** | EASU (DSP) or Real-ESRGAN (AI) | Directional sinc reconstruction or 6-block CNN | Vector-sharp edges up to 4x scaling with overlap patch tiling (~533 MB float32 accumulators at 1080p->4x; megapixel guard caps the transient). |
 | **Stage 3: Pyramids** | Multiscale Local Laplacian | 4-octave Gaussian/Laplacian band decomposition | Halo-free micro-texture ($L_1$) and structural contour ($L_2$) synthesis. |
 | **Stage 4: Dynamic Range** | BIMEF with Black-Point Pinning | Anchored S-curve + detail clarity gating | Seamless midtone recovery with inky blacks and zero haloing. |
 | **Stage 5: Edge Clarity** | Contrast-Adaptive Sharpening (CAS) | 3x3 local contrast min/max bound clamping | Halo-free micro-texture enhancement with zero edge overshoot. |

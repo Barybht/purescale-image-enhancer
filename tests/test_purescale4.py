@@ -1,9 +1,9 @@
 """Automated verification test suite for PureScale 4.0 Advanced Computer Vision."""
 
+import argparse
 import hashlib
 import math
 import os
-import sys
 import tempfile
 import time
 import unittest
@@ -57,11 +57,7 @@ from purescale.dsp.semantic import (
     extract_semantic_masks,
 )
 from purescale.dsp.filters import fast_guided_filter, fast_guided_filter_pair
-from purescale.dsp.dehaze import atmospheric_dehaze, compute_dark_channel
-from purescale.dsp.restore import (
-    directional_subpixel_depixelate,
-    tensor_steered_shock_filter,
-)
+from purescale.dsp.dehaze import atmospheric_dehaze
 from purescale.dsp.tone import local_tone_mapping
 from purescale.pipeline import PureScalePipeline
 
@@ -894,6 +890,50 @@ class TestPureScale4CliAndGui(unittest.TestCase):
             code = main()
         self.assertEqual(code, 0)
 
+    def test_cli_version_flag(self):
+        import io
+        from contextlib import redirect_stdout
+
+        import unittest.mock as mock
+
+        from purescale import __version__
+        from purescale.cli import main
+
+        buf = io.StringIO()
+        with mock.patch("sys.argv", ["purescale", "--version"]):
+            with self.assertRaises(SystemExit) as ctx:
+                with redirect_stdout(buf):
+                    main()
+        self.assertEqual(ctx.exception.code, 0)
+        self.assertIn(__version__, buf.getvalue())
+        self.assertIn("PureScale", buf.getvalue())
+
+    def test_compare_invocation_name_follows_entrypoint(self):
+        # Regression: main_compare hardcoded prog="enhance_image.py compare",
+        # so usage/errors printed the wrong program name under the installed
+        # `purescale` console script.
+        import io
+        from contextlib import redirect_stderr
+
+        import unittest.mock as mock
+
+        from purescale.cli import _invocation_name, main_compare
+
+        with mock.patch("sys.argv", [os.path.join("tools", "purescale.exe"), "compare"]):
+            self.assertEqual(_invocation_name(), "purescale.exe")
+        with mock.patch("sys.argv", [os.path.join("Program Files", "Python311", "python.exe")]):
+            self.assertEqual(_invocation_name(), "purescale")  # interpreter prefix stripped
+        with mock.patch("sys.argv", ["enhance_image.py", "x"]):
+            self.assertEqual(_invocation_name(), "enhance_image.py")
+
+        err = io.StringIO()
+        with mock.patch("sys.argv", ["enhance_image.py", "compare"]):
+            with self.assertRaises(SystemExit) as ctx:
+                with redirect_stderr(err):
+                    main_compare([])
+        self.assertEqual(ctx.exception.code, 2)
+        self.assertTrue(err.getvalue().startswith("usage: enhance_image.py compare"))
+
     def test_cli_stage_progress_heartbeat(self):
         # Regression: single-file runs printed nothing until completion —
         # large photos processed for tens of seconds and looked frozen.
@@ -1163,7 +1203,6 @@ class TestPureScale4CliAndGui(unittest.TestCase):
         except ImportError as e:
             self.skipTest(f"GUI dependencies not installed: {e}")
         from purescale.gui.app import PureScaleApp
-        from purescale.config import DiagnosticsResult
         try:
             app = PureScaleApp()
 
@@ -1720,6 +1759,18 @@ class TestPureScale4StyleProfiles(unittest.TestCase):
         with self.assertRaises(ValueError):
             PipelineConfig(style_profile="nope")
 
+    def test_apply_style_profile_unknown_name_raises(self):
+        # __post_init__ only validates constructor values; a profile name
+        # assigned after construction (tracking-only) reaches
+        # apply_style_profile directly, which must refuse garbage too.
+        from purescale.config import apply_style_profile
+
+        cfg = PipelineConfig()
+        cfg.style_profile = "definitely-not-a-profile"
+        with self.assertRaises(ValueError) as ctx:
+            apply_style_profile(cfg)
+        self.assertIn("Unknown style profile", str(ctx.exception))
+
     def test_photo_profile_byte_identical(self):
         pipeline = PureScalePipeline()
         np.random.seed(7)
@@ -1940,7 +1991,6 @@ class TestPureScale4AutoStyle(unittest.TestCase):
             self.assertEqual(classify_content_style(img), classify_content_style(img))
 
     def test_diagnose_image_input_guard(self):
-        from purescale.dsp.diagnostics import diagnose_image
 
         with self.assertRaises(ValueError):
             diagnose_image(None)
@@ -1954,7 +2004,6 @@ class TestPureScale4AutoStyle(unittest.TestCase):
         self.assertGreaterEqual(res.noise_sigma, 0.0)
 
     def test_chroma_category_populated(self):
-        from purescale.dsp.diagnostics import diagnose_image
 
         rng = np.random.default_rng(31)
         noisy = np.clip(
@@ -2097,6 +2146,62 @@ class TestPureScale4Packaging(unittest.TestCase):
         self.assertTrue(name)
         with self.assertRaises(ImportError):
             select_providers(DeviceTarget.OPENCV_DNN)
+
+    def test_explicit_fields_precedence_tracking(self):
+        from purescale.config import PipelineConfig as LocalConfig
+
+        # Fresh: nothing explicit.
+        self.assertEqual(PipelineConfig().explicit_fields, frozenset())
+
+        # Constructor kwarg that differs from the library default is explicit;
+        # a kwarg exactly equal to the default stays implicit (documented
+        # indistinguishability: assign such a field after construction to win).
+        self.assertEqual(LocalConfig(sharpen_strength=1.2).explicit_fields, frozenset({"sharpen_strength"}))
+        fresh_default = LocalConfig()
+        self.assertNotIn("sharpen_strength", fresh_default.explicit_fields)
+
+        # Post-construction mutation is always recorded.
+        fresh_default.sharpen_strength = 0.9
+        self.assertEqual(fresh_default.explicit_fields, frozenset({"sharpen_strength"}))
+
+    def test_validate_rejects_non_bool_auto_style(self):
+        with self.assertRaises(ValueError) as ctx:
+            PipelineConfig(auto_style="yes")
+        self.assertIn("auto_style", str(ctx.exception))
+
+    def test_to_dict_matches_field_values(self):
+        cfg = PipelineConfig()
+        d = cfg.to_dict()
+        for key, value in d.items():
+            expected = getattr(cfg, key)
+            if hasattr(expected, "value"):  # enum members serialize to .value
+                expected = expected.value
+            with self.subTest(key=key):
+                self.assertEqual(value, expected)
+
+        # Non-enum assignments serialize via the str() fallback branch.
+        cfg.mode = "puredsp"
+        cfg.device = "cuda"
+        d2 = cfg.to_dict()
+        self.assertEqual(d2["mode"], "puredsp")
+        self.assertEqual(d2["device"], "cuda")
+
+    def test_library_default_helper_contract(self):
+        from dataclasses import dataclass, field, fields
+
+        from purescale.config import _library_default
+
+        @dataclass
+        class _Probe:
+            required: int  # no default -> f.default and f.default_factory both MISSING
+            explicit: int = 3
+            factory: list = field(default_factory=list)
+
+        spec = fields(_Probe)
+        self.assertIsNone(_library_default(spec[0]))     # fallback return None
+        self.assertEqual(_library_default(spec[1]), 3)   # default branch
+        self.assertEqual(_library_default(spec[2]), [])  # default_factory branch
+
 
 
 class TestPureScale4Golden(unittest.TestCase):
@@ -2317,8 +2422,6 @@ class TestPureScale4CliBatch(unittest.TestCase):
 
 def _fake_parsed(**overrides) -> "argparse.Namespace":
     """argparse.Namespace mimicking main()'s parsed args with neutral defaults."""
-    import argparse
-
     defaults = dict(
         mode="puredsp", device="auto", style=None, style_profile=None,
         auto=False, auto_style=False, no_diagnostics=False, dehaze=None,
@@ -2954,7 +3057,6 @@ class TestPureScale4GuiStability(unittest.TestCase):
                 pass
 
     def test_stale_diagnostics_dropped(self):
-        from purescale.config import DiagnosticsResult
 
         app = self._make_app()
         try:
@@ -3038,6 +3140,89 @@ class TestPureScale4GuiStability(unittest.TestCase):
                 app.destroy()
             except (tk.TclError, RuntimeError):
                 pass
+
+
+class TestPureScale4BenchHarness(unittest.TestCase):
+    """Bench-harness contract: explicit fixture sets, median-of-n, JSON gate.
+
+    Loads bench/bench.py directly by path (it is a launcher-style module,
+    not a package member).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        import importlib.util
+
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        spec = importlib.util.spec_from_file_location(
+            "purescale_bench_harness", os.path.join(repo_root, "bench", "bench.py")
+        )
+        cls.bench = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.bench)
+
+    def test_check_regressions_tolerance_band_and_missing_keys(self):
+        import io
+        from contextlib import redirect_stdout
+
+        bench = self.bench
+        results = [
+            {"input": "320x240", "preset": "balanced", "scale": 1.0, "total_ms": 116.0},
+            {"input": "320x240", "preset": "balanced", "scale": 2.0, "total_ms": 110.0},
+            {"input": "320x240", "preset": "fast", "scale": 1.0, "total_ms": 100.0},
+        ]
+        baseline = {
+            "320x240|balanced|1.0": 100.0,  # 116 > 115 (100 + 15%) -> regression
+            "320x240|balanced|2.0": 100.0,  # within tolerance
+            # fast|1.0 deliberately absent from the baseline -> WARN + skip
+        }
+        out = io.StringIO()
+        with redirect_stdout(out):
+            regressions = bench._check_regressions(results, baseline, 0.15)
+        self.assertEqual([r["key"] for r in regressions], ["320x240|balanced|1.0"])
+        self.assertEqual(regressions[0]["baseline_ms"], 100.0)
+        self.assertEqual(regressions[0]["observed_ms"], 116.0)
+        self.assertIn("WARN", out.getvalue())
+
+    def test_main_emits_json_with_repeat_and_check(self):
+        import io
+        import json
+        from contextlib import redirect_stdout
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = self.bench.main(["--quick", "--repeat", "1", "--check", "--tolerance", "99", "--json"])
+        self.assertEqual(code, 0)
+        payload = json.loads(out.getvalue())
+        self.assertEqual(payload["repeat"], 1)
+        self.assertTrue(payload["check"]["passed"])
+        self.assertEqual(len(payload["results"]), 4)
+        for result in payload["results"]:
+            self.assertEqual(result["repeat"], 1)
+            self.assertGreater(result["total_ms"], 0.0)
+            self.assertTrue(result["stages_ms"])
+
+    def test_main_requires_explicit_fixture_set(self):
+        # No-flag used to silently run the quick matrix; both sets must be
+        # named explicitly now (regression to the documented behaviour).
+        import io
+        from contextlib import redirect_stderr
+
+        err = io.StringIO()
+        with self.assertRaises(SystemExit) as ctx:
+            with redirect_stderr(err):
+                self.bench.main([])
+        self.assertEqual(ctx.exception.code, 2)
+        self.assertIn("explicitly", err.getvalue())
+
+    def test_run_case_reports_median_of_repeat(self):
+        from purescale.pipeline import PureScalePipeline
+
+        img = self.bench.make_fixture(64, 64)
+        result = self.bench.run_case(PureScalePipeline(), img, "fast", 1.0, warmup=False, repeat=3)
+        self.assertEqual(result["repeat"], 3)
+        self.assertGreater(result["total_ms"], 0.0)
+        for ms in result["stages_ms"].values():
+            self.assertGreaterEqual(ms, 0.0)
 
 
 if __name__ == "__main__":

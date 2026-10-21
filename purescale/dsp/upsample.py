@@ -7,8 +7,13 @@ import numpy as np
 def edge_adaptive_upsample(img: np.ndarray, scale: float = 2.0) -> np.ndarray:
     """
     Edge-Adaptive Spatial Upsampling (EASU).
-    Evaluates directional structure tensors to detect edge tangents,
-    reconstructing smooth diagonal lines without staircase aliasing (jaggies).
+
+    Honesty note: despite the name, this is deterministic Lanczos-4 sinc
+    reconstruction followed by one Sobel-gradient-coherence-gated tangent
+    smoothing pass (a 3x3 Gaussian blend on high-coherence edges). It is
+    *simplified from* the EASU idea of structure-tensor edge-tangent
+    reconstruction; smooth diagonals come mostly from the Lanczos kernel,
+    not from directional synthesis.
     """
     if scale == 1.0:
         return img.copy()

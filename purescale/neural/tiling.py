@@ -1,6 +1,6 @@
 """Overlap patch tiling for bounded memory neural inference on arbitrary resolution."""
 
-from typing import Callable, Optional, Tuple
+from typing import Callable, Optional
 import cv2
 import numpy as np
 

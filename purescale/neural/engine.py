@@ -6,7 +6,7 @@ from typing import Optional, Callable
 import cv2
 import numpy as np
 
-from purescale.config import DeviceTarget, PipelineCancelled
+from purescale.config import DeviceTarget
 from purescale.device import cpu_label, select_providers
 from purescale.neural.models import MODEL_REGISTRY, ModelManager, get_default_model_path
 from purescale.neural.tiling import tile_process

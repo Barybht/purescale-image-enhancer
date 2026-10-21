@@ -6,9 +6,14 @@ import numpy as np
 
 def bimef_exposure_fusion(img: np.ndarray, contrast_boost: float = 1.8) -> np.ndarray:
     """
-    Bio-Inspired Contrast and Dynamic Range Enhancement with Black-Point Pinning.
-    Anchors deep blacks (<= 0.04) and specular highlights (>= 0.96) while expanding
-    midtone local contrast and clarity without lifting shadow floors or creating haze.
+    Contrast and dynamic range expansion with black-point pinning, named after
+    BIMEF (Ying et al. 2017).
+
+    Honesty note: this is a rational S-curve base/detail contrast expansion,
+    *named after but not implementing* the multi-exposure fusion pipeline of
+    BIMEF (no exposure synthesis, no Yin kernel fusion). Black points (<= 0.04)
+    and speculars (>= 0.96) are pinned while midtones expand: expanded local
+    contrast and clarity without lifting shadow floors or creating haze.
     """
     if contrast_boost <= 1.0:
         return img.copy()

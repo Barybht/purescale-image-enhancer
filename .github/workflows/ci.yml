@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [ main, master ]
 
+concurrency:
+  # One run per branch/PR: newer pushes cancel superseded runs instead of
+  # piling up runner minutes.
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Test (Python ${{ matrix.python-version }} on ${{ matrix.os }})
@@ -32,16 +41,82 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-gui.txt
-          pip install pytest
+          pip install pytest pytest-cov
+          # Model weights policy: intentionally NOT cached or downloaded in
+          # CI. All neural tests run against mocked registry entries with
+          # tiny in-repo file fixtures (see tests, Phase 3); nothing here
+          # should ever fetch from the model registry's remote URLs.
+
+      - name: Xvfb for GUI tests (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb python3-tk
+          echo "PURESCALE_CI_XVFB=1" >> "$GITHUB_ENV"
 
       - name: Verify zero non-ASCII emojis and code integrity
         run: |
-          python -m unittest tests.test_purescale4.TestPureScale4CodeIntegrity -v
+          python -m pytest tests -q -k "TestPureScale4CodeIntegrity"
 
-      - name: Run PureScale test suite
+      - name: Run PureScale test suite (Linux, Xvfb + coverage)
+        if: runner.os == 'Linux'
         run: |
-          python -m unittest discover -s tests -p "test_*.py" -v
+          # Virtual display so the Tk GUI classes execute instead of skipping.
+          xvfb-run -a python -m pytest tests -q --cov=purescale --cov-report=term-missing:skip-covered --cov-report=xml
 
-      - name: Performance regression gate (quick fixtures, tolerance for shared runners)
+      - name: Run PureScale test suite (Windows)
+        if: runner.os == 'Windows'
+        run: python -m pytest tests -q
+
+      - name: Upload coverage artifact (Linux, Python 3.12)
+        if: runner.os == 'Linux' && matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.python-version }}-${{ matrix.os }}
+          path: coverage.xml
+          retention-days: 7
+
+      - name: Performance regression gate (median of 3, tolerance for shared runners)
+        # Shared runners occasionally throttle for the whole job (co-tenants):
+        # the median cannot absorb a uniformly slow machine. One cooldown
+        # retry keeps transient noise from failing the PR while a persistent
+        # regression still fails twice. Git Bash exists on both runners, so
+        # this step is explicitly bash (the default shell is PowerShell on
+        # Windows and cannot parse this).
+        shell: bash
         run: |
-          python bench/bench.py --quick --check --tolerance 0.5
+          if ! python bench/bench.py --quick --check --tolerance 0.5; then
+            echo "Perf gate tripped; retrying once after cooldown (shared-runner noise protocol)."
+            sleep 10
+            python bench/bench.py --quick --check --tolerance 0.5
+          fi
+
+  lint:
+    name: Lint & types (ruff + mypy, permissive baseline)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install lint tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff mypy
+          pip install -r requirements-gui.txt
+
+      - name: Ruff (correctness classes only — see pyproject [tool.ruff])
+        run: ruff check purescale bench tests
+
+      - name: mypy (permissive baseline — see pyproject [tool.mypy])
+        # Advisory on purpose: the pipeline predates typing checks; the
+        # ~40 low-confidence inference findings (numpy/CTk attribute
+        # forwarding) get triaged in later phases instead of being
+        # blanket-ignored today.
+        run: mypy purescale
+        continue-on-error: true
