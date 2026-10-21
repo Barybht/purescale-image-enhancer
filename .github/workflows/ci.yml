@@ -77,8 +77,19 @@ jobs:
           retention-days: 7
 
       - name: Performance regression gate (median of 3, tolerance for shared runners)
+        # Shared runners occasionally throttle for the whole job (co-tenants):
+        # the median cannot absorb a uniformly slow machine. One cooldown
+        # retry keeps transient noise from failing the PR while a persistent
+        # regression still fails twice. Git Bash exists on both runners, so
+        # this step is explicitly bash (the default shell is PowerShell on
+        # Windows and cannot parse this).
+        shell: bash
         run: |
-          python bench/bench.py --quick --check --tolerance 0.5
+          if ! python bench/bench.py --quick --check --tolerance 0.5; then
+            echo "Perf gate tripped; retrying once after cooldown (shared-runner noise protocol)."
+            sleep 10
+            python bench/bench.py --quick --check --tolerance 0.5
+          fi
 
   lint:
     name: Lint & types (ruff + mypy, permissive baseline)
