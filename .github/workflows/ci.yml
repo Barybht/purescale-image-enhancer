@@ -58,15 +58,15 @@ jobs:
         run: |
           python -m pytest tests -q -k "TestPureScale4CodeIntegrity"
 
-      - name: Run PureScale test suite
+      - name: Run PureScale test suite (Linux, Xvfb + coverage)
+        if: runner.os == 'Linux'
         run: |
-          # Linux: run under a virtual display so the Tk GUI classes execute
-          # instead of skipping (windows-latest has a real session).
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            xvfb-run -a python -m pytest tests -q --cov=purescale --cov-report=term-missing:skip-covered --cov-report=xml
-          else
-            python -m pytest tests -q
-          fi
+          # Virtual display so the Tk GUI classes execute instead of skipping.
+          xvfb-run -a python -m pytest tests -q --cov=purescale --cov-report=term-missing:skip-covered --cov-report=xml
+
+      - name: Run PureScale test suite (Windows)
+        if: runner.os == 'Windows'
+        run: python -m pytest tests -q
 
       - name: Upload coverage artifact (Linux, Python 3.12)
         if: runner.os == 'Linux' && matrix.python-version == '3.12'
