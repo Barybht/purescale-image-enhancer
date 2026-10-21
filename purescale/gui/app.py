@@ -342,7 +342,8 @@ class PureScaleApp(ctk.CTk):
         "contrast_switch", "contrast_slider", "bright_slider", "local_tone_switch",
         "tone_strength_slider", "hl_recovery_slider", "shadow_boost_slider",
         "vibrance_slider", "temp_slider", "tint_slider", "depixel_slider",
-        "deblur_slider", "smooth_slider", "eye_slider", "fast_2x_switch", "fmt_seg",
+        "deblur_slider", "smooth_slider", "eye_slider", "fast_2x_switch",
+        "max_mp_slider", "fmt_seg",
     )
 
     def _set_params_enabled(self, enabled: bool) -> None:
@@ -651,7 +652,13 @@ class PureScaleApp(ctk.CTk):
                 "Semantic Region Guidance: sky/foliage/skin masks that steer "
                 "detail and denoise. Off is faster; detail falls back to global.\n"
                 "BIMEF Dynamic Range Fusion: HDR midtone recovery. Off keeps "
-                "original exposure curve."
+                "original exposure curve.\n"
+                "2x Neural Fast Path: pre-downscales before 4x inference at "
+                "scales up to 2.0x (~4x faster). Needed for large images, whose "
+                "reference 4x intermediate would exceed the memory guard.\n"
+                "Memory Guard: abort above this many input/output megapixels "
+                "(default 40 MP). Raise it for 2x on 10+ MP photos if the "
+                "machine has RAM to spare; 2x of a 10 MP photo is ~41 MP."
             ),
         )
         self.perf_card.pack(fill="x", padx=12, pady=4)
@@ -666,6 +673,11 @@ class PureScaleApp(ctk.CTk):
         self.contrast_switch.pack(anchor="w", padx=12, pady=(2, 2))
         self.fast_2x_switch = ctk.CTkSwitch(self.perf_card, text="2x Neural Fast Path", font=font("ui11"), progress_color=PALETTE["accent_bright"])
         self.fast_2x_switch.pack(anchor="w", padx=12, pady=(2, 4))
+        self.max_mp_slider = LabeledSlider(
+            self.perf_card, label="Memory Guard (MP)",
+            from_=10, to=160, default_val=40, step=10, is_float=True,
+        )
+        self.max_mp_slider.pack(fill="x", padx=8, pady=(2, 6))
 
         # Spatial Scaling Card
         self.scale_card = ParameterCard(
@@ -676,7 +688,7 @@ class PureScaleApp(ctk.CTk):
                 "Output magnification.\n\n"
                 "1.0 keeps original size (quality pass only), 2.0 doubles "
                 "width and height, up to 4.0. Larger scales need more RAM "
-                "and time; the OOM guard caps output at 40 MP."
+                "and time; the Memory Guard (default 40 MP) caps input/output."
             ),
         )
         self.scale_card.pack(fill="x", padx=12, pady=4)
@@ -1212,10 +1224,70 @@ class PureScaleApp(ctk.CTk):
             portrait_smooth=int(self.smooth_slider.get()),
             eye_clarity=self.eye_slider.get(),
             enable_fast_2x=bool(self.fast_2x_switch.get()),
+            max_megapixels=float(self.max_mp_slider.get()),
             sr_style=self.style_seg.get().lower(),
             output_format=self.fmt_seg.get(),
         )
         return cfg
+
+    def _preflight_guard(self, cfg: PipelineConfig) -> bool:
+        """Fails fast before the worker starts; returns False when the job must not run.
+
+        Mirrors the pipeline's OOM guards (input, output, and the native 4x
+        neural intermediate). When the neural fast path is the only thing
+        standing between the user and a usable run, offers to enable it
+        instead of surfacing the pipeline's CLI-oriented error later.
+        """
+        try:
+            h0, w0 = self.current_orig_bgr.shape[:2]
+        except (AttributeError, ValueError, TypeError):
+            return True
+
+        in_mp = w0 * h0 / 1e6
+        dest_mp = in_mp * cfg.scale * cfg.scale
+        limit = cfg.max_megapixels
+        if in_mp > limit:
+            messagebox.showerror(
+                "Image Too Large",
+                f"Input is {in_mp:.1f} MP (limit {limit:.1f} MP).\n"
+                "Reduce the input resolution or raise the Memory Guard in Performance & Telemetry.",
+            )
+            return False
+        if dest_mp > limit:
+            messagebox.showerror(
+                "Image Too Large",
+                f"Output would be {dest_mp:.1f} MP (limit {limit:.1f} MP).\n"
+                "Lower the scale or raise the Memory Guard in Performance & Telemetry.",
+            )
+            return False
+
+        fast_path_active = cfg.enable_fast_2x and cfg.scale <= 2.0
+        neural = cfg.mode in (ProcessingMode.NEURAL_AI, ProcessingMode.HYBRID)
+        if neural and 1.0 < cfg.scale < 4.0 and not fast_path_active:
+            interp_mp = in_mp * 16.0
+            if interp_mp > limit:
+                if cfg.scale <= 2.0:
+                    use_fast = messagebox.askyesno(
+                        "Enable Neural Fast Path?",
+                        f"Neural AI at {cfg.scale:g}x runs a full 4x pass before downscaling, "
+                        f"which needs a {interp_mp:.1f} MP intermediate (limit {limit:.1f} MP).\n\n"
+                        "Enable the 2x Neural Fast Path and continue?\n"
+                        "It is about 4x faster; the trade-off is slightly softer sub-pixel texture.",
+                    )
+                    if not use_fast:
+                        return False
+                    self.fast_2x_switch.select()
+                    cfg.enable_fast_2x = True
+                else:
+                    messagebox.showerror(
+                        "Neural Intermediate Too Large",
+                        f"Neural AI at {cfg.scale:g}x runs a full 4x pass first, which needs a "
+                        f"{interp_mp:.1f} MP intermediate (limit {limit:.1f} MP).\n\n"
+                        "The fast path only applies up to 2.0x. Lower the scale, reduce the "
+                        "input resolution, or raise the Memory Guard in Performance & Telemetry.",
+                    )
+                    return False
+        return True
 
     def _start_enhancement_async(self) -> None:
         """Spawns enhancement worker thread."""
@@ -1227,21 +1299,8 @@ class PureScaleApp(ctk.CTk):
             return
 
         cfg = self._get_current_config()
-
-        # Pre-flight OOM guard: fail fast before the worker thread starts.
-        try:
-            h0, w0 = self.current_orig_bgr.shape[:2]
-            dest_mp = (w0 * cfg.scale) * (h0 * cfg.scale) / 1e6
-            in_mp = w0 * h0 / 1e6
-            if max(in_mp, dest_mp) > cfg.max_megapixels:
-                messagebox.showerror(
-                    "Image Too Large",
-                    f"Output would be {dest_mp:.1f} MP (limit {cfg.max_megapixels:.1f} MP).\n"
-                    "Lower the scale or raise max_megapixels.",
-                )
-                return
-        except (AttributeError, ValueError, TypeError):
-            pass
+        if not self._preflight_guard(cfg):
+            return
 
         self.is_processing = True
         self._cancel_event.clear()

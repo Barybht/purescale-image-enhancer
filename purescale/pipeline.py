@@ -436,21 +436,30 @@ class PureScalePipeline:
                 f"Increase max_megapixels or reduce scale to prevent out-of-memory."
             )
 
-        # Neural-mode memory accounting: without --fast-2x, a target_scale
-        # below the native 4x still runs FULL 4x tiled inference first, so the
-        # real intermediate is 16x the input pixels — and tile_process keeps
-        # output-sized float32 accumulators (~16 bytes/output px). The plain
-        # orig/dest guards above never saw that intermediate.
-        if mode in (ProcessingMode.NEURAL_AI, ProcessingMode.HYBRID) and not cfg.enable_fast_2x:
-            native_scale = 4  # the registry ships x4 super-resolution models only
-            if cfg.scale < native_scale:
+        # Neural-mode memory accounting: the registry ships native 4x models
+        # only, so a target scale below 4x without the fast path still runs
+        # FULL 4x tiled inference first. The real intermediate is then 16x the
+        # input pixels — and tile_process keeps output-sized float32
+        # accumulators (~16 bytes/output px). The plain orig/dest guards above
+        # never saw that intermediate.
+        #
+        # Two exceptions, mirroring engine.upscale():
+        #   * target_scale <= 1.0 returns a copy / plain resize (no inference),
+        #   * fast-2x pre-downscales, but only applies for 1.0 < scale <= 2.0.
+        # Above 2.0x a toggle on the switch does nothing, so the guard must
+        # still account for the full 4x intermediate.
+        native_scale = 4
+        if mode in (ProcessingMode.NEURAL_AI, ProcessingMode.HYBRID) and 1.0 < cfg.scale < native_scale:
+            fast_path_active = cfg.enable_fast_2x and cfg.scale <= 2.0
+            if not fast_path_active:
                 interp_pixels = orig_pixels * native_scale * native_scale
                 if interp_pixels > max_allowed_pixels:
                     raise ValueError(
                         f"Neural pipeline at {cfg.scale}x runs full {native_scale}x inference before "
                         f"downsampling ({interp_pixels / 1e6:.2f} MP intermediate), exceeding the "
-                        f"{cfg.max_megapixels:.1f} MP guard. Enable --fast-2x (pre-downscale before "
-                        f"{native_scale}x inference) or reduce the input resolution / raise max_megapixels."
+                        f"{cfg.max_megapixels:.1f} MP guard. Enable the fast path for scales up to "
+                        f"2.0x (CLI --fast-2x, GUI '2x Neural Fast Path'), lower the input "
+                        f"resolution, or raise max_megapixels (GUI 'Memory Guard')."
                     )
 
         def report(stage_name: str, ratio: float) -> None:

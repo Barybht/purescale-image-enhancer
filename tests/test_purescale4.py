@@ -1595,6 +1595,70 @@ class TestPureScale4MemoryGuard(unittest.TestCase):
             pipeline.enhance(img, config=cfg)
         self.assertIn("Output target resolution", str(ctx.exception))
 
+    class _IdentityEngine:
+        """Engine double: guard tests must never resolve or download weights."""
+
+        backend_name = "stub"
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def upscale(self, img, target_scale=2.0, tile_size=256, tile_overlap=32,
+                    fast_2x=False, cancel_check=None):
+            height, width = img.shape[:2]
+            return cv2.resize(
+                img,
+                (max(1, int(round(width * target_scale))),
+                 max(1, int(round(height * target_scale)))),
+                interpolation=cv2.INTER_NEAREST,
+            )
+
+    def _neural_cfg(self, **overrides):
+        values = dict(
+            mode=ProcessingMode.NEURAL_AI,
+            enable_diagnostics=False,
+            enable_pyramid=False,
+            portrait_smooth=0,
+            eye_clarity=1.0,
+            max_megapixels=0.0005,
+        )
+        values.update(overrides)
+        return PipelineConfig(**values)
+
+    def test_neural_guard_skips_inference_free_scales(self):
+        """1.0x never runs inference, so no 4x intermediate is allocated.
+
+        The guard used to reject this path even though engine.upscale()
+        returns a copy for target_scale <= 1.0, which made 1.0x neural
+        unusable for every image larger than the guard's input cap.
+        """
+        import purescale.pipeline as pipe_mod
+
+        pipeline = PureScalePipeline()
+        cfg = self._neural_cfg(scale=1.0, enable_fast_2x=False)
+        with patch.object(pipe_mod, "NeuralSuperResEngine", self._IdentityEngine):
+            res = pipeline.enhance(np.zeros((8, 8, 3), dtype=np.uint8), config=cfg)
+        self.assertEqual(res.image.shape, (8, 8, 3))
+
+    def test_neural_guard_skips_fast_path_targets(self):
+        """At <=2.0x the fast path keeps the intermediate at target size."""
+        import purescale.pipeline as pipe_mod
+
+        pipeline = PureScalePipeline()
+        cfg = self._neural_cfg(scale=2.0, enable_fast_2x=True)
+        with patch.object(pipe_mod, "NeuralSuperResEngine", self._IdentityEngine):
+            res = pipeline.enhance(np.zeros((8, 8, 3), dtype=np.uint8), config=cfg)
+        self.assertEqual(res.image.shape, (16, 16, 3))
+
+    def test_neural_guard_still_counts_4x_when_fast_path_inapplicable(self):
+        """Above 2.0x the engine ignores fast_2x, so the guard must stay armed."""
+        pipeline = PureScalePipeline()
+        cfg = self._neural_cfg(scale=2.5, enable_fast_2x=True)
+        with self.assertRaises(ValueError) as ctx:
+            pipeline.enhance(np.zeros((8, 8, 3), dtype=np.uint8), config=cfg)
+        self.assertIn("intermediate", str(ctx.exception))
+        self.assertIn("fast path", str(ctx.exception))
+
 
 class TestPureScale4NeuralIntegration(unittest.TestCase):
     """Integration tests executing real neural inference models."""
@@ -3135,6 +3199,89 @@ class TestPureScale4GuiStability(unittest.TestCase):
             self.assertFalse(app._typing_in_entry())
             handler()
             self.assertEqual(len(calls), 2)
+        finally:
+            try:
+                app.destroy()
+            except (tk.TclError, RuntimeError):
+                pass
+
+
+    def test_preflight_no_prompt_at_unity_scale(self):
+        import unittest.mock as mock
+
+        app = self._make_app()
+        try:
+            app.current_orig_bgr = np.zeros((100, 100, 3), dtype=np.uint8)
+            cfg = PipelineConfig(
+                mode=ProcessingMode.NEURAL_AI, scale=1.0,
+                enable_fast_2x=False, max_megapixels=0.05,
+            )
+            with mock.patch("purescale.gui.app.messagebox.askyesno") as ask, \
+                    mock.patch("purescale.gui.app.messagebox.showerror") as err:
+                self.assertTrue(app._preflight_guard(cfg))
+            ask.assert_not_called()
+            err.assert_not_called()
+        finally:
+            try:
+                app.destroy()
+            except (tk.TclError, RuntimeError):
+                pass
+
+    def test_preflight_offers_fast_path_and_respects_refusal(self):
+        import unittest.mock as mock
+
+        app = self._make_app()
+        try:
+            app.current_orig_bgr = np.zeros((100, 100, 3), dtype=np.uint8)
+            cfg = PipelineConfig(
+                mode=ProcessingMode.NEURAL_AI, scale=1.5,
+                enable_fast_2x=False, max_megapixels=0.05,
+            )
+            with mock.patch("purescale.gui.app.messagebox.askyesno", return_value=False) as ask:
+                self.assertFalse(app._preflight_guard(cfg))
+            ask.assert_called_once()
+            self.assertFalse(app.fast_2x_switch.get())
+            self.assertFalse(cfg.enable_fast_2x)
+
+            with mock.patch("purescale.gui.app.messagebox.askyesno", return_value=True) as ask:
+                self.assertTrue(app._preflight_guard(cfg))
+            ask.assert_called_once()
+            self.assertTrue(app.fast_2x_switch.get())
+            self.assertTrue(cfg.enable_fast_2x)
+        finally:
+            try:
+                app.destroy()
+            except (tk.TclError, RuntimeError):
+                pass
+
+    def test_preflight_blocks_neural_intermediate_above_2x(self):
+        import unittest.mock as mock
+
+        app = self._make_app()
+        try:
+            app.current_orig_bgr = np.zeros((80, 80, 3), dtype=np.uint8)
+            cfg = PipelineConfig(
+                mode=ProcessingMode.NEURAL_AI, scale=2.5,
+                enable_fast_2x=True, max_megapixels=0.05,
+            )
+            with mock.patch("purescale.gui.app.messagebox.askyesno") as ask, \
+                    mock.patch("purescale.gui.app.messagebox.showerror") as err:
+                self.assertFalse(app._preflight_guard(cfg))
+            ask.assert_not_called()
+            err.assert_called_once()
+            self.assertIn("Intermediate", str(err.call_args))
+        finally:
+            try:
+                app.destroy()
+            except (tk.TclError, RuntimeError):
+                pass
+
+    def test_memory_guard_slider_feeds_config(self):
+        app = self._make_app()
+        try:
+            app.max_mp_slider.set(80)
+            cfg = app._get_current_config()
+            self.assertAlmostEqual(cfg.max_megapixels, 80.0)
         finally:
             try:
                 app.destroy()
