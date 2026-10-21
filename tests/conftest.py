@@ -79,14 +79,25 @@ def _create_tk_interpreter_intercepted(*args, **kwargs):
             return _real_tkinter.create(*args, **kwargs)
         except tk.TclError as err:
             message = str(err)
-            if "Can't find a usable init.tcl" not in message and "Can't find a usable tk.tcl" not in message:
+            # Two observed symptoms of the same partial-init failure family
+            # (see module docstring): Tcl cannot find its library paths, or
+            # the library script ran against a half-initialized interp and
+            # never defined tcl_findLibrary. Both leave a fresh interpreter
+            # creation as the recovery path; everything else propagates.
+            retriable = (
+                "Can't find a usable init.tcl" in message
+                or "Can't find a usable tk.tcl" in message
+                or "tcl_findLibrary" in message
+            )
+            if not retriable:
                 raise
             last_error = err
             import sys as _sys
 
             print(
-                f"\n[conftest] Tcl library path failed on Tk init attempt {attempt + 1}; "
-                "force-restoring TCL_LIBRARY/TK_LIBRARY and retrying.",
+                f"\n[conftest] Tcl init failed on Tk init attempt {attempt + 1} "
+                f"({message.splitlines()[0]}); force-restoring TCL_LIBRARY/TK_LIBRARY "
+                "and retrying.",
                 file=_sys.stderr,
                 flush=True,
             )
