@@ -61,3 +61,35 @@ purescale-gui = "purescale.gui.app:launch_gui"
 # candidates and aborts, which broke `pip install -e .` / `pip wheel`.
 [tool.setuptools.packages.find]
 include = ["purescale*"]
+
+# pytest runs the existing unittest classes directly (no rewrite needed;
+# `python -m unittest discover` keeps working identically).
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+# gui: needs a display (auto-skips headless); neural: downloads/touches model
+# weights (registry entries are mocked, weights stay cached or absent);
+# slow: runs the multi-second bench/perf-style paths.
+markers = [
+    "gui: creates Tk widgets (skipped when no display is available)",
+    "neural: touches onnxruntime/model weight machinery",
+    "slow: multi-second tests",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+# Start permissive (Phase 6 baseline): lint correctness classes only, no
+# formatting churn, no style opinions. Tighten in later phases.
+[tool.ruff.lint]
+select = ["E9", "F", "W"]
+ignore = []
+
+[tool.mypy]
+# Permissive start: the DSP pipeline is numpy-heavy and was written before
+# any type checking; surface untyped-callables only, no strictness flags.
+python_version = "3.9"
+files = ["purescale"]
+check_untyped_defs = false
+ignore_missing_imports = true
+exclude = ["build/", "tests/"]

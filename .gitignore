@@ -51,3 +51,9 @@ test_input*
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Test/coverage tooling (pytest-cov, Phase 6)
+.pytest_cache/
+.coverage
+coverage.xml
+

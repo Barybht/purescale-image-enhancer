@@ -240,10 +240,25 @@ def _json_safe(obj: Any) -> Any:
     return obj
 
 
+def _invocation_name() -> str:
+    """How the user actually invoked us (script name or console-script name).
+
+    The compare subparser used a hardcoded "enhance_image.py compare", which
+    printed the wrong program name under the installed `purescale`
+    console script; deriving it from sys.argv[0] keeps usage/errors honest
+    for both entry points (falls back to "purescale").
+    """
+    argv0 = (sys.argv and sys.argv[0]) or ""
+    name = os.path.basename(argv0) if argv0 else ""
+    if not name or name.endswith("python.exe") or name.endswith("python"):
+        name = "purescale"
+    return name
+
+
 def main_compare(argv: List[str]) -> int:
     """Compares two images with PSNR/SSIM. Usage: compare BEFORE AFTER [--json]."""
     parser = argparse.ArgumentParser(
-        prog="enhance_image.py compare",
+        prog=f"{_invocation_name()} compare",
         description="Compare two images with PSNR and SSIM (alpha channels ignored)",
     )
     parser.add_argument("before", help="Path to reference image")

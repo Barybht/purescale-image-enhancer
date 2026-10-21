@@ -195,6 +195,10 @@ When local contrast is extreme ($M - m \approx 1$), $\text{amp} \rightarrow 0$ a
 
 ### 2.9 Oklab Perceptual Color Vibrance & Bradford CAT16
 
+> Naming honesty: the "CAT16" stage is a heuristic von Kries diagonal on the
+> **CAT02** cone-response matrix (the code keeps the `bradford_cat16_white_balance`
+> name for API stability); it is not a full Bradford / CAT16 adaptation.
+
 Conversion from linear sRGB to LMS human photoreceptor cone space:
 
 $$\begin{bmatrix} l \\ m \\ s \end{bmatrix} = \mathbf{M}_1 \begin{bmatrix} r \\ g \\ b \end{bmatrix}, \quad l' = l^{1/3}, \quad m' = m^{1/3}, \quad s' = s^{1/3}$$
@@ -211,7 +215,7 @@ Because hue lines in Oklab are strictly collinear, saturation boosts never disto
 
 ---
 
-### 2.8 Neural Super-Resolution & 2x Fast Path Formulation
+### 2.10 Neural Super-Resolution & 2x Fast Path Formulation
 
 For neural magnification with compact 4x models ($\mathcal{M}_{4\times}$), a target magnification $s = 2.0$ conventionally requires full 4x spatial inference followed by high-order downsampling:
 
@@ -235,7 +239,7 @@ Additionally, the neural super-resolution stage supports style-aware model routi
 
 ---
 
-### 2.9 Local Tone-Mapping & Highlight Reconstruction
+### 2.11 Local Tone-Mapping & Highlight Reconstruction
 
 Images exhibiting clipped highlights (e.g. blown skies, specular reflections) or crushed shadows (e.g. backlit scenes) suffer from loss of dynamic range. PureScale 4.0 provides a proxy-accelerated Fast Guided Filter base/detail decomposition that compresses large-scale dynamic range while preserving high-frequency textures without boundary halos.
 
@@ -274,7 +278,7 @@ $$I^c_{\text{out}} = I^c \cdot \frac{L'}{L + 10^{-4}} (1.0 - \beta_h \cdot 0.70 
 
 ---
 
-### 2.10 Style-Bound DSP Profiles
+### 2.12 Style-Bound DSP Profiles
 
 Neural style selection (`photo` / `anime`) swaps edge-synthesis weights, but
 the analytical DSP chain underneath was historically photo-tuned for every

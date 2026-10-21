@@ -8,7 +8,6 @@ to recover clipped highlights and lift crushed shadows without halo artifacts,
 and smoothly reconstructs blown highlight channels toward neutral white.
 """
 
-from typing import Tuple
 import cv2
 import numpy as np
 

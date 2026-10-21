@@ -1,8 +1,14 @@
 """Multiscale Local Laplacian Pyramid Filtering for PureScale 4.0.
 
 Provides edge-preserving octave frequency band decomposition (L0, L1, L2, G3)
-with non-linear micro-texture enhancement and halo-free dynamic range control,
-following the principles of Paris, Hasinoff, and Kautz (SIGGRAPH 2011).
+with non-linear micro-texture enhancement and halo-free dynamic range control.
+
+Honesty note: despite the "Local Laplacian" label, this is a global
+band-gain Laplacian pyramid - each octave gets a single non-linear
+transfer gain over the whole frame. It is *inspired by* the
+edge-aware principles of Paris, Hasinoff, and Kautz (SIGGRAPH 2011)
+but does not implement their local Laplacian filtering (no per-pixel
+continuous remapping / frequency processing at each level).
 """
 
 from typing import List, Optional, Tuple
@@ -204,8 +210,6 @@ def multiscale_laplacian_filter(
 
     # 6. Process Base Residual G3 (Low-frequency illumination field)
     if dynamic_range_compression > 0.01:
-        # Compress base tone smoothly without halos
-        mean_lum = float(np.mean(base_g3))
         # Gamma tone curve centered on mean luminance
         compressed = np.power(np.clip(base_g3, 1e-4, 1.0), 0.85)
         base_g3 = (1.0 - dynamic_range_compression) * base_g3 + dynamic_range_compression * compressed

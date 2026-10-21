@@ -12,7 +12,19 @@
 
 ## PureDSP Stage Latency Telemetry
 
-Benchmark methodology: 5 consecutive iterations per resolution after warm-up pass.
+Benchmark harness (`bench/bench.py --full`, methodology updated in Phase 6):
+one warm-up pass per case, then `--repeat` measured iterations (default 3);
+every recorded total is the **median** run, which absorbs one-off co-runner
+spikes. The fixture set is explicit (`--quick` for the CI gate, `--full` for
+this document's matrix) — invoking the harness without a flag no longer
+silently means quick. The rows below were recorded before Phase 6 as single
+measured runs after warm-up; re-record them with
+`python bench/bench.py --full --json --csv bench/results.csv`.
+
+CI gate: `python bench/bench.py --quick --check --tolerance 0.5` fails when a
+median exceeds the stored `bench/baseline.json` total by more than 50% (a wide
+band against shared-runner noise; the local default tolerance is 15%).
+
 All advanced computer vision algorithms enabled simultaneously:
 - Autonomous Signal Diagnostics
 - Multi-Cue Analytical Semantic Parsing

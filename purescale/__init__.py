@@ -5,7 +5,20 @@ image quality diagnostics, Dark Channel Prior dehazing, multiscale Local Laplaci
 pyramid filtering, and edge neural super-resolution (Real-ESRGAN Compact).
 """
 
-__version__ = "4.0.0"
+# Single source of truth for the version is pyproject.toml; when the package
+# is installed (pip install -e . included) the metadata wins, and the static
+# fallback covers interpreter runs straight from a repo checkout with no
+# install metadata present.
+try:
+    from importlib.metadata import PackageNotFoundError, version as _md_version
+
+    try:
+        __version__ = _md_version("purescale")
+    except PackageNotFoundError:
+        __version__ = "4.0.0"
+except ImportError:  # importlib.metadata requires Python 3.8+; 3.9 floor makes this moot
+    __version__ = "4.0.0"
+
 __author__ = "PureScale Architecture Team"
 
 # Suppress OpenCV 5.x DNN new-graph-engine WARN spam
