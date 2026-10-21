@@ -919,9 +919,9 @@ class TestPureScale4CliAndGui(unittest.TestCase):
 
         from purescale.cli import _invocation_name, main_compare
 
-        with mock.patch("sys.argv", ["C:\\tools\\purescale.exe", "compare"]):
+        with mock.patch("sys.argv", [os.path.join("tools", "purescale.exe"), "compare"]):
             self.assertEqual(_invocation_name(), "purescale.exe")
-        with mock.patch("sys.argv", ["C:\\Program Files\\Python311\\python.exe"]):
+        with mock.patch("sys.argv", [os.path.join("Program Files", "Python311", "python.exe")]):
             self.assertEqual(_invocation_name(), "purescale")  # interpreter prefix stripped
         with mock.patch("sys.argv", ["enhance_image.py", "x"]):
             self.assertEqual(_invocation_name(), "enhance_image.py")
