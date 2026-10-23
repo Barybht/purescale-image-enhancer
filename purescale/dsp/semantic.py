@@ -26,14 +26,12 @@ class SemanticMasks:
 
 def extract_semantic_masks(
     img_bgr: np.ndarray,
-    face_boxes: Optional[np.ndarray] = None,
 ) -> SemanticMasks:
     """
     Extracts multi-cue continuous soft semantic probability masks.
 
     Args:
         img_bgr: uint8 BGR image [H, W, 3]
-        face_boxes: Optional Nx4 or Nx14 array of detected face bounding boxes
 
     Returns:
         SemanticMasks container with soft masks [H, W] float32 in [0.0, 1.0]

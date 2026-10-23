@@ -71,9 +71,8 @@ class InteractiveCanvas(tk.Canvas):
         self,
         orig: Optional[Image.Image],
         enh: Optional[Image.Image],
-        force_fit: Optional[bool] = None,
     ) -> None:
-        """Sets active images and updates viewport to fit if requested or in fit mode."""
+        """Sets active images and fits the viewport on a new source or in fit mode."""
         prev_orig = self.orig_pil
         prev_enh = self.enh_pil
 
@@ -98,7 +97,7 @@ class InteractiveCanvas(tk.Canvas):
             )
         )
 
-        if force_fit is True or is_new_source or self.is_fit_mode:
+        if is_new_source or self.is_fit_mode:
             self.is_fit_mode = True
             self.fit_to_window()
         else:
