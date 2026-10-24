@@ -367,8 +367,8 @@ PureScale 4.0 deploys a dual-engine hardware acceleration layer:
 | **Oklab Vibrance (Stage 6)**| LMS Photoreceptor | $O(N)$ | Zen 4 CPU AVX-512 | ~306 ms |
 | **Bradford CAT16 (Stage 7)**| Von Kries Transform | $O(N)$ | Zen 4 CPU AVX-512 | — (off by default) |
 | **PureDSP Mode (Total)** | Complete Analytical | $O(N)$ | AMD Zen 4 CPU | **~2.0 s at 1.0x; ~5.0 s at 2.0x to 4K** |
-| **Neural AI Mode (Total)** | 6-Block CNN + Pyramids | $O(\text{CNN}) + O(N)$ | AMD Radeon 760M (DirectML) | **~360 ms (DirectML-GPU estimate, pending re-measurement)** |
-| **Hybrid Mode (Total)** | AI + Multiscale DSP | $O(\text{CNN}) + O(N)$ | DirectML GPU + Zen CPU | **~420 ms (DirectML-GPU estimate, pending re-measurement)** |
+| **Neural AI Mode (Total)** | 6-Block CNN + Pyramids | $O(\text{CNN}) + O(N)$ | AMD Radeon 760M (DirectML) | **~11 s at 2.0x to 4K (DirectML, measured)** |
+| **Hybrid Mode (Total)** | AI + Multiscale DSP | $O(\text{CNN}) + O(N)$ | DirectML GPU + Zen CPU | **~14 s at 2.0x to 4K (DirectML, measured)** |
 
 ---
 
@@ -376,13 +376,20 @@ PureScale 4.0 deploys a dual-engine hardware acceleration layer:
 
 Evaluated across commodity laptop hardware (AMD Ryzen 5 PRO 7640HS + Radeon 760M iGPU):
 
-| Architecture | Paradigm | 1080p Latency (1.0x scale) | Peak Memory | Determinism | Hallucination Risk |
+| Architecture | Paradigm | 1080p Latency (measured) | Peak Memory | Determinism | Hallucination Risk |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **PureScale 4.0 (PureDSP)** | Analytical Multiscale DSP | **~2.0 s** | **~62 MB** | **Deterministic\*** | **0% (None)** |
-| **PureScale 4.0 (Hybrid)** | AI + Multiscale DSP | **~420 ms** | **~195 MB** | High Reproducibility | Minimal |
-| **PureScale 4.0 (Neural AI)**| Compact Edge CNN | **~360 ms** | **~145 MB** | DirectML Consistent | Low |
+| **PureScale 4.0 (PureDSP)** | Analytical Multiscale DSP | **~2.0 s** (1.0x) | **~62 MB** | **Deterministic\*** | **0% (None)** |
+| **PureScale 4.0 (Hybrid)** | AI + Multiscale DSP | **~14 s** (2.0x → 4K) | **~195 MB** | High Reproducibility | Minimal |
+| **PureScale 4.0 (Neural AI)**| Compact Edge CNN | **~11 s** (2.0x → 4K) | **~145 MB** | DirectML Consistent | Low |
 | **Real-ESRGAN (Full CPU)** | 23-Block RRDBNet | ~14,200 ms | ~1,850 MB | Non-deterministic | Moderate-High |
 | **Stable Diffusion Upscaler** | Latent Diffusion | ~48,000 ms | ~4,200 MB | Stochastic | Extreme |
+
+The Neural/Hybrid figures are balanced-preset totals with diagnostics enabled
+(median of 3 after a warm-up, deterministic bench fixture, DirectML on the
+reference Ryzen 5 PRO 7640HS + Radeon 760M host). At 1.0x no neural inference
+runs: Neural AI is ~0.1 s and Hybrid ~1.1 s. `--fast-2x` lowers the 1080p
+figures to ~6.4 s (Hybrid) and ~3.2 s (Neural); absolute times vary by roughly
+10% run to run on the shared iGPU.
 
 \*Run-to-run on a fixed host/build; cross-platform reproducibility is gated
 by golden fixtures at SSIM $> 0.999$ / PSNR $> 60$ dB (floating-point
