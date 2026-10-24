@@ -33,6 +33,13 @@ PureScale 4.0 is an autonomous, multiscale computational vision and edge neural 
 6. **Live Signal Diagnostics HUD in Obsidian Studio**:
    - Real-time telemetry card displaying noise floor, blur index, entropy, and haze index with one-click Auto-Enhance.
 
+> **A note on algorithm names:** several stages keep their widely known labels
+> for compatibility. "Local Laplacian" is a global per-octave band-gain pyramid
+> (not the per-pixel filtering of Paris et al.), "EASU" is Lanczos-4 followed by
+> a coherence-gated smoothing pass, "BIMEF" is an anchored S-curve base/detail
+> expansion rather than multi-exposure fusion, and "CAT16" is a von Kries
+> diagonal on a CAT02 matrix. `ARCHITECTURE.md` §2 documents the exact math.
+
 ---
 
 ## Three Processing Engines

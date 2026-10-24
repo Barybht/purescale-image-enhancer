@@ -36,6 +36,12 @@ graph TD
     L --> M["Stage 9: Serialization & Containerization<br/>(PNG Lossless / JPEG / WebP Encoding)"]
 ```
 
+> **Naming honesty:** stage labels are kept for API stability, not to claim the
+> original algorithms. "EASU" is Lanczos-4 sinc reconstruction plus one
+> coherence-gated smoothing pass, not structure-tensor directional synthesis.
+> The other borrowed labels are documented where their math is defined:
+> "Local Laplacian" (§2.3), "BIMEF" (§2.7), and "CAT16" (§2.9).
+
 ---
 
 ## 2. Mathematical Formulations & Algorithmic Theory
@@ -97,6 +103,12 @@ $$f(v, g, \tau) = v \cdot \left( 1.0 + (g - 1.0) \cdot \exp\left( -\frac{|v|}{\t
 Full spatial reconstruction collapses the pyramid with exact energy conservation:
 
 $$\tilde{G}_k = \text{pyrUp}(\tilde{G}_{k+1}) + L_k'$$
+
+> **Naming honesty:** despite the label, this is a **global** band-gain
+> Laplacian pyramid: each octave receives one non-linear transfer gain over the
+> whole frame. It is *inspired by* the edge-aware principles of Paris, Hasinoff
+> and Kautz (SIGGRAPH 2011) but does not implement their per-pixel local
+> Laplacian remapping.
 
 ---
 
@@ -176,6 +188,10 @@ High-frequency detail is adaptively boosted only within midtones, gated by smoot
 $$W_{\text{detail}}(x, y) = \text{clip}\left(\frac{L - 0.04}{0.16}, 0.0, 1.0\right) \cdot \text{clip}\left(\frac{0.96 - L}{0.16}, 0.0, 1.0\right)$$
 
 $$L_{\text{enhanced}}(x, y) = \text{clip}\left(f(L_{\text{base}}(x, y)) + L_{\text{detail}}(x, y) \cdot (1.0 + (\beta - 1.0) \cdot 0.4 \cdot W_{\text{detail}}(x, y)), 0.0, 1.0\right)$$
+
+> **Naming honesty:** this is a rational S-curve base/detail expansion *named
+> after* BIMEF, not an implementation of its multi-exposure fusion pipeline
+> (there is no exposure synthesis or Yin kernel fusion).
 
 ---
 
