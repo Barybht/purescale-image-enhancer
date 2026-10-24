@@ -47,8 +47,8 @@ PureScale 4.0 is an autonomous, multiscale computational vision and edge neural 
 | Mode | Technology Stack | Hardware Target | Latency | Primary Advantage |
 | :--- | :--- | :--- | :--- | :--- |
 | **PureDSP** | EASU + Laplacian Pyramids + Dehaze + CAS + SWF + BIMEF + Oklab + CAT16 | AMD Zen 4 CPU (AVX-512) | **~0.7–5.0 s (resolution-dependent)** | Deterministic (fixed host), zero neural weights, zero hallucination. |
-| **Neural AI** | Real-ESRGAN General x4v3 (~4.87 MB ONNX) + Laplacian Pyramids | AMD Radeon 760M (DirectML GPU) | ~350-500 ms | Deep perceptual edge synthesis and compression artifact removal. |
-| **Hybrid** | Neural Super-Resolution + Multiscale Pyramids + Pinned BIMEF + Oklab + CAS | DirectML GPU + Zen CPU | ~400-600 ms | Neural edge reconstruction with pure mathematical color science and halo-free micro-clarity. |
+| **Neural AI** | Real-ESRGAN General x4v3 (~4.87 MB ONNX) + Laplacian Pyramids | AMD Radeon 760M (DirectML GPU) | ~11 s (1080p→4K); ~3.2 s with fast path | Deep perceptual edge synthesis and compression artifact removal. |
+| **Hybrid** | Neural Super-Resolution + Multiscale Pyramids + Pinned BIMEF + Oklab + CAS | DirectML GPU + Zen CPU | ~14 s (1080p→4K); ~6.4 s with fast path | Neural edge reconstruction with pure mathematical color science and halo-free micro-clarity. |
 
 ---
 
@@ -71,16 +71,22 @@ PureScale 4.0 is an autonomous, multiscale computational vision and edge neural 
 
 ## Performance Benchmark
 
-PureDSP figures re-measured with `bench/bench.py` (balanced preset, deterministic
-fixtures) on AMD64 CPU; historical neural figures below are DirectML-GPU
-estimates pending re-measurement on reference hardware:
+Measured on the reference machine (AMD Ryzen 5 PRO 7640HS + Radeon 760M iGPU;
+DirectML; balanced preset; diagnostics on; median of 3–5 runs after a warm-up).
+PureDSP figures come from `bench/bench.py` on the same host:
 
 | Input Resolution | Scaling Factor | Output Resolution | PureDSP Mode | Hybrid Mode | Neural AI Mode |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| 512 x 512 (0.26 MP) | 2.0x | 1024 x 1024 (1.05 MP) | **~0.7 s** | ~140 ms | ~120 ms |
-| 1280 x 720 (0.92 MP) | 2.0x | 2560 x 1440 (3.68 MP) | **~2.3 s** | ~280 ms | ~240 ms |
-| 1920 x 1080 (2.07 MP) | 2.0x | 3840 x 2160 (4K UHD) | **~5.0 s** | ~420 ms | ~360 ms |
-| 3840 x 2160 (8.29 MP) | 2.0x | 7680 x 4320 (8K UHD) | **~20 s** | ~1,450 ms | ~1,250 ms |
+| 512 x 512 (0.26 MP) | 2.0x | 1024 x 1024 (1.05 MP) | **~0.7 s** | ~2.1 s | ~1.6 s |
+| 1280 x 720 (0.92 MP) | 2.0x | 2560 x 1440 (3.68 MP) | **~2.3 s** | ~6.7 s | ~5.6 s |
+| 1920 x 1080 (2.07 MP) | 2.0x | 3840 x 2160 (4K UHD) | **~5.0 s** | ~14 s | ~11 s |
+| 3840 x 2160 (8.29 MP) | 2.0x | 7680 x 4320 (8K UHD) | **~20 s** | ~23 s † | ~13 s † |
+
+† Measured with `--fast-2x`. The default memory guard rejects the native 4x
+intermediate for 4K input (132.7 MP) and recommends the fast path instead.
+At 1080p the fast path lowers those totals to ~6.4 s (Hybrid) and ~3.2 s
+(Neural) at the fidelity cost documented in [`BENCH.md`](BENCH.md). At 1.0x no
+neural inference runs: Neural AI is ~0.1 s and Hybrid ~1.1 s.
 
 Peak RAM footprint remains strictly bounded under **65 MB** for PureDSP and under **280 MB** for Neural/Hybrid modes via overlap tiling.
 Comprehensive stage latency benchmarks are documented in [`BENCH.md`](BENCH.md).

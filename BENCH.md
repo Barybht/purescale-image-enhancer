@@ -141,6 +141,10 @@ Measured on AMD Ryzen 5 PRO 7640HS (DirectML GPU and Zen 4 CPU AVX-512):
   micro-textures (`golden_texture`), 0.5x pre-decimation removes high frequencies
   before neural feature extraction, resulting in PSNR dropping to 17.02 dB and
   SSIM to 0.6956.
+- **Re-measurement note (2026-10-24)**: absolute totals depend on preset,
+  diagnostics, and iGPU thermal state. The current balanced-preset figures with
+  diagnostics on are 1080p ~10.8-11.8 s reference / ~3.2 s fast and 720p
+  ~5.6 s reference, reported in the README performance table.
 - **Outcome**: The fast path is shipped as an optional feature (`enable_fast_2x`,
   CLI `--fast-2x`, GUI toggle, enabled in preset `fast`) rather than the default.
   Reference 4x-then-downsample remains default for fidelity.

@@ -15,9 +15,9 @@ try:
     try:
         __version__ = _md_version("purescale")
     except PackageNotFoundError:
-        __version__ = "4.0.0"
+        __version__ = "4.0.1"
 except ImportError:  # importlib.metadata requires Python 3.8+; 3.9 floor makes this moot
-    __version__ = "4.0.0"
+    __version__ = "4.0.1"
 
 __author__ = "PureScale Architecture Team"
 
