@@ -134,27 +134,3 @@ def tensor_steered_shock_filter(
         cur = np.clip(np.rint(blend), 0.0, 255.0).astype(np.uint8)
 
     return cur
-
-
-def pre_restoration_conditioning(
-    img: np.ndarray,
-    depixel_strength: int = 0,
-    deblur_strength: int = 0,
-) -> np.ndarray:
-    """
-    Applies de-pixelation and tensor-steered deblurring prior to super-resolution.
-
-    Args:
-        img: uint8 BGR image [H, W, 3]
-        depixel_strength: Anti-aliasing strength (0-100)
-        deblur_strength: Tensor shock deblur strength (0-100)
-
-    Returns:
-        Conditioned uint8 BGR image [H, W, 3]
-    """
-    out = img
-    if depixel_strength > 0:
-        out = directional_subpixel_depixelate(out, strength=depixel_strength)
-    if deblur_strength > 0:
-        out = tensor_steered_shock_filter(out, strength=deblur_strength)
-    return out

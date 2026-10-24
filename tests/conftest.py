@@ -88,6 +88,17 @@ def _create_tk_interpreter_intercepted(*args, **kwargs):
                 "Can't find a usable init.tcl" in message
                 or "Can't find a usable tk.tcl" in message
                 or "tcl_findLibrary" in message
+                # Third symptom from the same family: the pinned library
+                # directory is missing a startup script Tcl loads eagerly
+                # (seen with auto.tcl after interpreter churn). Retrying with
+                # freshly pinned directories recovers it.
+                or (
+                    "couldn't read file" in message
+                    and any(
+                        script in message
+                        for script in ("auto.tcl", "init.tcl", "tk.tcl")
+                    )
+                )
             )
             if not retriable:
                 raise

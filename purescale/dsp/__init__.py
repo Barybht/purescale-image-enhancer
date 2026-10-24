@@ -24,7 +24,6 @@ from purescale.dsp.color import (
 from purescale.dsp.restore import (
     directional_subpixel_depixelate,
     tensor_steered_shock_filter,
-    pre_restoration_conditioning,
 )
 from purescale.dsp.diagnostics import (
     DiagnosticsResult,
@@ -70,7 +69,6 @@ __all__ = [
     "bradford_cat16_white_balance",
     "directional_subpixel_depixelate",
     "tensor_steered_shock_filter",
-    "pre_restoration_conditioning",
     "DiagnosticsResult",
     "diagnose_image",
     "auto_tune_parameters",
