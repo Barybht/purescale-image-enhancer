@@ -56,9 +56,9 @@ purescale = "purescale.cli:main"
 purescale-gui = "purescale.gui.app:launch_gui"
 
 # Explicit package discovery. The repo root also hosts thin launcher modules
-# (enhance_image.py, gui.py, engine_2026.py, portrait.py) and the bench/models
-# directories; flat-layout auto-discovery sees all of them as top-level
-# candidates and aborts, which broke `pip install -e .` / `pip wheel`.
+# (enhance_image.py, gui.py) and the bench/models directories; flat-layout
+# auto-discovery sees all of them as top-level candidates and aborts, which
+# broke `pip install -e .` / `pip wheel`.
 [tool.setuptools.packages.find]
 include = ["purescale*"]
 

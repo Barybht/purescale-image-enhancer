@@ -866,17 +866,16 @@ class TestPureScale4CliAndGui(unittest.TestCase):
     """Test suite for CLI arguments and Headless GUI controls."""
 
     def setUp(self):
-        self.temp_in = os.path.abspath("test_temp_in.png")
-        self.temp_out = os.path.abspath("test_temp_out.png")
+        self.temp_dir = tempfile.TemporaryDirectory(prefix="purescale-cli-")
+        self.temp_in = os.path.join(self.temp_dir.name, "test_temp_in.png")
+        self.temp_out = os.path.join(self.temp_dir.name, "test_temp_out.png")
         sample = np.zeros((80, 80, 3), dtype=np.uint8)
         sample[:40, :] = [200, 100, 50]
         sample[40:, :] = [50, 180, 70]
         cv2.imwrite(self.temp_in, sample)
 
     def tearDown(self):
-        for f in (self.temp_in, self.temp_out):
-            if os.path.exists(f):
-                os.remove(f)
+        self.temp_dir.cleanup()
 
     def test_cli_compare_dispatch_from_sys_argv(self):
         # Regression: the script entry calls main() with args=None; the
@@ -2322,9 +2321,7 @@ class TestPureScale4Quality(unittest.TestCase):
     def test_cli_compare(self):
         from purescale.cli import main_compare
 
-        d = os.path.abspath("test_compare_tmp")
-        os.makedirs(d, exist_ok=True)
-        try:
+        with tempfile.TemporaryDirectory(prefix="purescale-compare-") as d:
             a = os.path.join(d, "a.png")
             b = os.path.join(d, "b.png")
             cv2.imwrite(a, np.full((32, 32, 3), 100, dtype=np.uint8))
@@ -2332,9 +2329,6 @@ class TestPureScale4Quality(unittest.TestCase):
             self.assertEqual(main_compare([a, b]), 0)
             self.assertEqual(main_compare([a, b, "--json"]), 0)
             self.assertEqual(main_compare([a, os.path.join(d, "missing.png")]), 1)
-        finally:
-            import shutil
-            shutil.rmtree(d, ignore_errors=True)
 
 
 class TestPureScale4Models(unittest.TestCase):
