@@ -273,14 +273,10 @@ class PresetPicker(ctk.CTkFrame):
             font=("Consolas", 11),
         )
         self._listbox.pack(side="left", fill="both", expand=True)
-        # ttk/club scrollbar: native tk.Scrollbar renders its trough in
-        # system colors on Windows (white at rest). A clam-styled ttk bar
-        # with the arrows removed stays fully themed.
+        # ttk scrollbar: a clam-styled ttk bar with the arrows removed stays
+        # fully themed; the theme itself is set once at app startup so the
+        # popup never mutates global ttk state.
         style = ttk.Style()
-        try:
-            style.theme_use("clam")
-        except tk.TclError:
-            pass
         style_name = "PresetPicker.Vertical.TScrollbar"
         style.layout(style_name, [(
             "Vertical.Scrollbar.trough",

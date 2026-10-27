@@ -5,7 +5,7 @@ import os
 import queue
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, ttk
 from typing import Dict, Optional
 
 import customtkinter as ctk
@@ -76,6 +76,12 @@ class PureScaleApp(ctk.CTk):
         self._setup_drag_and_drop()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(50, self._drain_ui_queue)
+        # Set the ttk theme once at startup so the preset popup's themed
+        # scrollbar never mutates global ttk state on every open.
+        try:
+            ttk.Style().theme_use("clam")
+        except tk.TclError:
+            pass
 
     def _detect_hardware(self) -> None:
         """Determines active hardware acceleration device name."""
@@ -184,9 +190,13 @@ class PureScaleApp(ctk.CTk):
         content_frame.pack(fill="both", expand=True)
 
         # Left Scrollable Sidebar (kinetic smooth scrolling; categorized tabs)
+        # Width scales with screen resolution so it stays usable on small
+        # laptop displays and doesn't look cramped on 4K+ monitors.
+        screen_w = self.winfo_screenwidth()
+        sidebar_w = min(max(int(screen_w * 0.20), 300), 520)
         self.sidebar = SmoothScrollableFrame(
             content_frame,
-            width=390,
+            width=sidebar_w,
             fg_color=PALETTE["bg_bar"],
             corner_radius=0,
             scrollbar_button_color=PALETTE["surface_hover"],

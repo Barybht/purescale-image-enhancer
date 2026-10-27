@@ -38,6 +38,14 @@ class InteractiveCanvas(tk.Canvas):
         self._tk_img: Optional[ImageTk.PhotoImage] = None
         self._redraw_after: Optional[str] = None
 
+        # Wheel-delta accumulator. Windows emits ~±120 per wheel notch while
+        # macOS trackpads emit tiny deltas (±1..2) per scroll event. Without
+        # accumulation every macOS micro-scroll would trigger a full 15% zoom,
+        # making the canvas feel hypersensitive. We accumulate until one
+        # "notch" worth of delta has built up, then zoom once.
+        self._wheel_delta: float = 0.0
+        self._WHEEL_NOTCH = 120.0
+
         # Display-size resizes, cached across redraws. Redraw fires on every
         # divider-drag and pan frame; without the cache each frame re-runs
         # PIL LANCZOS/BILINEAR over multi-megapixel sources (hundreds of ms
@@ -317,7 +325,18 @@ class InteractiveCanvas(tk.Canvas):
             self.fit_to_window()
 
     def _on_mouse_wheel(self, event) -> None:
-        factor = 1.15 if event.delta > 0 else 0.85
+        """Zoom on wheel scroll, with platform-normalized delta.
+
+        Windows emits ~±120 per wheel notch; macOS trackpads emit tiny
+        deltas per scroll event. Accumulate until one notch has built up,
+        then apply a single zoom step so the canvas feels consistent across
+        platforms instead of hypersensitive on macOS.
+        """
+        self._wheel_delta += float(event.delta)
+        if abs(self._wheel_delta) < self._WHEEL_NOTCH:
+            return
+        factor = 1.15 if self._wheel_delta > 0 else 0.85
+        self._wheel_delta = 0.0
         self._zoom_at(event.x, event.y, factor)
 
     def _zoom_at(self, cx: float, cy: float, factor: float) -> None:

@@ -4,9 +4,24 @@ All GUI colors and fonts live here. Call sites reference roles
 (``PALETTE["surface"]``), never hex literals, so palette unification and
 future theming touch exactly one file. Values below reproduce the
 long-standing Obsidian palette 1:1.
+
+Font families are chosen per-platform: Consolas/Segoe UI are Windows-only,
+so macOS and Linux fall back to system monospace/sans families that Tk can
+actually resolve instead of rendering in an ugly fallback.
 """
 
+import sys
 import customtkinter as ctk
+
+if sys.platform == "win32":
+    _MONO = "Consolas"
+    _UI = "Segoe UI"
+elif sys.platform == "darwin":
+    _MONO = "Menlo"
+    _UI = ".AppleSystemUIFont"
+else:
+    _MONO = "monospace"
+    _UI = "sans-serif"
 
 PALETTE = {
     # Backgrounds
@@ -37,17 +52,17 @@ PALETTE = {
 }
 
 _FONTS = {
-    "mono15b": ("Consolas", 15, "bold"),
-    "mono14b": ("Consolas", 14, "bold"),
-    "mono11b": ("Consolas", 11, "bold"),
-    "mono11": ("Consolas", 11, "normal"),
-    "mono10b": ("Consolas", 10, "bold"),
-    "mono9b": ("Consolas", 9, "bold"),
-    "mono8b": ("Consolas", 8, "bold"),
-    "ui13b": ("Segoe UI", 13, "bold"),
-    "ui12b": ("Segoe UI", 12, "bold"),
-    "ui11": ("Segoe UI", 11, "normal"),
-    "ui10": ("Segoe UI", 10, "normal"),
+    "mono15b": (_MONO, 15, "bold"),
+    "mono14b": (_MONO, 14, "bold"),
+    "mono11b": (_MONO, 11, "bold"),
+    "mono11": (_MONO, 11, "normal"),
+    "mono10b": (_MONO, 10, "bold"),
+    "mono9b": (_MONO, 9, "bold"),
+    "mono8b": (_MONO, 8, "bold"),
+    "ui13b": (_UI, 13, "bold"),
+    "ui12b": (_UI, 12, "bold"),
+    "ui11": (_UI, 11, "normal"),
+    "ui10": (_UI, 10, "normal"),
 }
 
 
