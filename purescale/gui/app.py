@@ -30,6 +30,7 @@ from purescale.dsp.diagnostics import auto_tune_parameters, diagnose_image
 from purescale.dsp.semantic import extract_semantic_masks
 from purescale.gui.canvas import InteractiveCanvas
 from purescale.gui.components import DiagnosticsHUDCard, LabeledSlider, ParameterCard, PresetPicker
+from purescale.gui.paramspec import SEGMENT_WIDGET_ATTRS, build_param_bindings
 from purescale.gui.scrolling import SmoothScrollableFrame
 from purescale.pipeline import PureScalePipeline
 
@@ -218,6 +219,7 @@ class PureScaleApp(ctk.CTk):
         self.progress_bar.pack(side="right", padx=16)
 
         self._populate_sidebar()
+        self._param_bindings = build_param_bindings(self)
 
     def _bind_shortcuts(self) -> None:
         """Binds studio keyboard shortcuts for rapid workflow (all guarded)."""
@@ -334,18 +336,6 @@ class PureScaleApp(ctk.CTk):
         return handler
 
     # -- job lifecycle ------------------------------------------------------------
-    _PARAM_WIDGET_NAMES = (
-        "mode_seg", "style_seg", "auto_style_switch", "diagnostics_switch",
-        "dehaze_switch", "dehaze_slider", "pyramid_switch", "pyramid_detail_slider",
-        "pyramid_struct_slider", "pyramid_dynrange_slider", "semantic_switch",
-        "scale_slider", "cas_slider", "denoise_switch", "denoise_slider",
-        "contrast_switch", "contrast_slider", "bright_slider", "local_tone_switch",
-        "tone_strength_slider", "hl_recovery_slider", "shadow_boost_slider",
-        "vibrance_slider", "temp_slider", "tint_slider", "depixel_slider",
-        "deblur_slider", "smooth_slider", "eye_slider", "fast_2x_switch",
-        "max_mp_slider", "fmt_seg",
-    )
-
     def _set_params_enabled(self, enabled: bool) -> None:
         """Greys out (and restores) the inspector parameter widgets during a job.
 
@@ -353,8 +343,17 @@ class PureScaleApp(ctk.CTk):
         make that visible instead of letting edits silently do nothing.
         """
         state = "normal" if enabled else "disabled"
-        for name in self._PARAM_WIDGET_NAMES:
-            widget = getattr(self, name, None)
+        for binding in self._param_bindings:
+            spec, widget = binding.spec, binding.widget
+            try:
+                if spec.kind == "slider":
+                    widget.set_enabled(enabled)
+                else:
+                    widget.configure(state=state)
+            except (tk.TclError, AttributeError, ValueError):
+                pass
+        for attr in SEGMENT_WIDGET_ATTRS:
+            widget = getattr(self, attr, None)
             if widget is None:
                 continue
             try:
@@ -889,37 +888,62 @@ class PureScaleApp(ctk.CTk):
         self._on_sidebar_tab_change("Profiles")
 
     def _on_mode_change(self, mode_str: str) -> None:
-        """Handles execution engine mode change, enabling/disabling widgets appropriately."""
-        is_neural = (mode_str == "Neural AI")
+        """Handles execution engine mode change, enabling/disabling widgets appropriately.
 
-        # CAS Sharpen: enabled in PureDSP and Hybrid, disabled in Neural AI
-        self.cas_slider.set_enabled(not is_neural)
-
-        # Contrast & Brightness (BIMEF): enabled in PureDSP and Hybrid, disabled in Neural AI
-        self.contrast_slider.set_enabled(not is_neural)
-        self.bright_slider.set_enabled(not is_neural)
-
-        # Local Tone: enabled in PureDSP and Hybrid, disabled in Neural AI
-        self.local_tone_switch.configure(state="normal" if not is_neural else "disabled")
-        self.tone_strength_slider.set_enabled(not is_neural)
-        self.hl_recovery_slider.set_enabled(not is_neural)
-        self.shadow_boost_slider.set_enabled(not is_neural)
-
-        # Perceptual Vibrance & Color Temp: enabled in PureDSP and Hybrid, disabled in Neural AI
-        self.vibrance_slider.set_enabled(not is_neural)
-        self.temp_slider.set_enabled(not is_neural)
-        self.tint_slider.set_enabled(not is_neural)
-
-        # SWF Denoise: enabled in PureDSP and Hybrid, disabled in Neural AI
-        self.denoise_switch.configure(state="normal" if not is_neural else "disabled")
-        self.denoise_slider.set_enabled(not is_neural)
-
-        # Style selector: enabled in Neural AI and Hybrid, disabled in PureDSP
+        Widget enablement is declared once in the :mod:`purescale.gui.paramspec`
+        registry (D1/D5), so this is a single loop instead of a hand-written
+        per-widget block. ``style_seg`` follows the same neural/hybrid gate.
+        """
         is_dsp = (mode_str == "PureDSP")
-        self.style_seg.configure(state="disabled" if is_dsp else "normal")
 
-        # 2x fast path: neural-only toggle, meaningless in PureDSP
-        self.fast_2x_switch.configure(state="disabled" if is_dsp else "normal")
+        for binding in self._param_bindings:
+            spec, widget = binding.spec, binding.widget
+            if spec.enabled_modes is None:
+                continue
+            enabled = mode_str in spec.enabled_modes
+            try:
+                if spec.kind == "slider":
+                    widget.set_enabled(enabled)
+                else:
+                    widget.configure(state="normal" if enabled else "disabled")
+            except (tk.TclError, AttributeError, ValueError):
+                pass
+
+        # style_seg follows the same neural/hybrid gate as fast_2x_switch.
+        try:
+            self.style_seg.configure(state="disabled" if is_dsp else "normal")
+        except (tk.TclError, AttributeError):
+            pass
+
+    def apply_config_to_ui(self, cfg: PipelineConfig) -> None:
+        """Applies a ``PipelineConfig`` to every inspector widget.
+
+        Single source of truth for config->widget mapping, replacing the
+        former per-source duplication (preset overlay, auto-tune sync).
+        Mode itself is deliberately *not* touched here: presets never change
+        the execution engine.
+        """
+        for binding in self._param_bindings:
+            spec, setter = binding.spec, binding.set
+            value = getattr(cfg, spec.config_field, spec.default)
+            try:
+                setter(value)
+            except (tk.TclError, AttributeError, ValueError):
+                logger.warning(
+                    "failed to apply %s=%r to widget %s",
+                    spec.config_field, value, spec.widget_attr,
+                )
+        # Segmented fields with value transforms.
+        style_labels = [s.title() for s in valid_sr_styles()]
+        style_label = str(getattr(cfg, "sr_style", "photo")).title()
+        try:
+            self.style_seg.set(style_label if style_label in style_labels else style_labels[0])
+        except (tk.TclError, AttributeError):
+            pass
+        try:
+            self.fmt_seg.set(cfg.output_format)
+        except (tk.TclError, AttributeError):
+            pass
 
     def _on_preset_change(self, preset_name: str) -> None:
         """Loads preset configuration into slider widgets."""
@@ -934,63 +958,7 @@ class PureScaleApp(ctk.CTk):
             return
         self._current_preset = preset_name.title()
         self.preset_opt.set(self._current_preset)
-        self.scale_slider.set(cfg.scale)
-        self.cas_slider.set(cfg.sharpen_strength)
-        self.denoise_slider.set(cfg.denoise_intensity)
-        if cfg.enable_denoise:
-            self.denoise_switch.select()
-        else:
-            self.denoise_switch.deselect()
-        self.contrast_slider.set(cfg.contrast_boost)
-        self.bright_slider.set(cfg.brightness_shift)
-        self.vibrance_slider.set(cfg.vibrance_boost)
-        self.temp_slider.set(cfg.color_temperature)
-        self.tint_slider.set(getattr(cfg, "color_tint", 0))
-        self.smooth_slider.set(cfg.portrait_smooth)
-        self.eye_slider.set(cfg.eye_clarity)
-        self.depixel_slider.set(getattr(cfg, "depixel_strength", 0))
-        self.deblur_slider.set(getattr(cfg, "deblur_strength", 0))
-        if hasattr(cfg, "enable_dehaze"):
-            if cfg.enable_dehaze:
-                self.dehaze_switch.select()
-            else:
-                self.dehaze_switch.deselect()
-            self.dehaze_slider.set(cfg.dehaze_strength)
-        if hasattr(cfg, "enable_pyramid"):
-            if cfg.enable_pyramid:
-                self.pyramid_switch.select()
-            else:
-                self.pyramid_switch.deselect()
-            self.pyramid_detail_slider.set(cfg.pyramid_micro_texture)
-            self.pyramid_struct_slider.set(cfg.pyramid_structure_boost)
-            self.pyramid_dynrange_slider.set(getattr(cfg, "pyramid_dynamic_range", 0.0))
-        # Performance/telemetry parity with CLI --fast / --no-* flags.
-        if getattr(cfg, "enable_diagnostics", True):
-            self.diagnostics_switch.select()
-        else:
-            self.diagnostics_switch.deselect()
-        if getattr(cfg, "enable_semantic_guidance", True):
-            self.semantic_switch.select()
-        else:
-            self.semantic_switch.deselect()
-        if getattr(cfg, "enable_contrast", True):
-            self.contrast_switch.select()
-        else:
-            self.contrast_switch.deselect()
-        if getattr(cfg, "enable_local_tone", False):
-            self.local_tone_switch.select()
-        else:
-            self.local_tone_switch.deselect()
-        self.tone_strength_slider.set(getattr(cfg, "local_tone_strength", 0.50))
-        self.hl_recovery_slider.set(getattr(cfg, "highlight_recovery", 0.50))
-        self.shadow_boost_slider.set(getattr(cfg, "shadow_boost", 0.50))
-        if getattr(cfg, "enable_fast_2x", False):
-            self.fast_2x_switch.select()
-        else:
-            self.fast_2x_switch.deselect()
-        style_labels = [s.title() for s in valid_sr_styles()]
-        style_label = str(getattr(cfg, "sr_style", "photo")).title()
-        self.style_seg.set(style_label if style_label in style_labels else style_labels[0])
+        self.apply_config_to_ui(cfg)
 
     def _on_view_mode_change(self, mode_str: str) -> None:
         """Updates interactive canvas rendering mode."""
@@ -1125,51 +1093,22 @@ class PureScaleApp(ctk.CTk):
             self.configure(cursor="")
 
     def _apply_diagnostics_to_ui(self, diag: DiagnosticsResult) -> None:
-        """Synchronizes UI sliders with auto-tuned parameters."""
+        """Synchronizes UI sliders with auto-tuned parameters.
+
+        Reads ``diag.recommended_parameters`` (or computes them) and applies
+        each present field through the shared registry, so auto-tune and
+        preset application write widgets identically.
+        """
         rec = diag.recommended_parameters or auto_tune_parameters(diag)
-        if "denoise_intensity" in rec:
-            self.denoise_slider.set(rec["denoise_intensity"])
-        if "enable_denoise" in rec:
-            if rec["enable_denoise"]:
-                self.denoise_switch.select()
-            else:
-                self.denoise_switch.deselect()
-        if "sharpen_strength" in rec:
-            self.cas_slider.set(rec["sharpen_strength"])
-        if "deblur_strength" in rec:
-            self.deblur_slider.set(rec["deblur_strength"])
-        if "contrast_boost" in rec:
-            self.contrast_slider.set(rec["contrast_boost"])
-        if "brightness_shift" in rec:
-            self.bright_slider.set(rec["brightness_shift"])
-        if "color_temperature" in rec:
-            self.temp_slider.set(rec["color_temperature"])
-        if "color_tint" in rec:
-            self.tint_slider.set(rec["color_tint"])
-        if "vibrance_boost" in rec:
-            self.vibrance_slider.set(rec["vibrance_boost"])
-        if "enable_dehaze" in rec:
-            if rec["enable_dehaze"]:
-                self.dehaze_switch.select()
-            else:
-                self.dehaze_switch.deselect()
-        if "dehaze_strength" in rec:
-            self.dehaze_slider.set(rec["dehaze_strength"])
-        if "pyramid_micro_texture" in rec:
-            self.pyramid_detail_slider.set(rec["pyramid_micro_texture"])
-        if "pyramid_structure_boost" in rec:
-            self.pyramid_struct_slider.set(rec["pyramid_structure_boost"])
-        if "enable_local_tone" in rec:
-            if rec["enable_local_tone"]:
-                self.local_tone_switch.select()
-            else:
-                self.local_tone_switch.deselect()
-        if "local_tone_strength" in rec:
-            self.tone_strength_slider.set(rec["local_tone_strength"])
-        if "highlight_recovery" in rec:
-            self.hl_recovery_slider.set(rec["highlight_recovery"])
-        if "shadow_boost" in rec:
-            self.shadow_boost_slider.set(rec["shadow_boost"])
+        for binding in self._param_bindings:
+            spec, setter = binding.spec, binding.set
+            field = spec.config_field
+            if field not in rec:
+                continue
+            try:
+                setter(rec[field])
+            except (tk.TclError, AttributeError, ValueError):
+                logger.warning("failed to apply auto-tune %s=%r", field, rec[field])
 
     def _on_auto_enhance_click(self) -> None:
         """Executes autonomous auto-tuning and enhancement."""
@@ -1186,7 +1125,12 @@ class PureScaleApp(ctk.CTk):
         self._start_enhancement_async()
 
     def _get_current_config(self) -> PipelineConfig:
-        """Gathers parameters from UI controls into a PipelineConfig."""
+        """Gathers parameters from UI controls into a PipelineConfig.
+
+        Every registry-driven field is read once through its widget binding
+        (single source of truth); only the three segmented buttons need an
+        explicit enum/lowercase transform.
+        """
         mode_map = {
             "PureDSP": ProcessingMode.PURE_DSP,
             "Neural AI": ProcessingMode.NEURAL_AI,
@@ -1195,39 +1139,19 @@ class PureScaleApp(ctk.CTk):
         cfg = PipelineConfig(
             mode=mode_map.get(self.mode_seg.get(), ProcessingMode.PURE_DSP),
             device=DeviceTarget.AUTO,
-            enable_diagnostics=bool(self.diagnostics_switch.get()),
             auto_tune=False,
-            auto_style=bool(self.auto_style_switch.get()),
-            enable_dehaze=bool(self.dehaze_switch.get()),
-            dehaze_strength=self.dehaze_slider.get(),
-            enable_pyramid=bool(self.pyramid_switch.get()),
-            pyramid_micro_texture=self.pyramid_detail_slider.get(),
-            pyramid_structure_boost=self.pyramid_struct_slider.get(),
-            pyramid_dynamic_range=self.pyramid_dynrange_slider.get(),
-            enable_semantic_guidance=bool(self.semantic_switch.get()),
-            scale=self.scale_slider.get(),
-            sharpen_strength=self.cas_slider.get(),
-            enable_denoise=bool(self.denoise_switch.get()),
-            denoise_intensity=int(self.denoise_slider.get()),
-            enable_contrast=bool(self.contrast_switch.get()),
-            contrast_boost=self.contrast_slider.get(),
-            brightness_shift=int(self.bright_slider.get()),
-            enable_local_tone=bool(self.local_tone_switch.get()),
-            local_tone_strength=self.tone_strength_slider.get(),
-            highlight_recovery=self.hl_recovery_slider.get(),
-            shadow_boost=self.shadow_boost_slider.get(),
-            vibrance_boost=self.vibrance_slider.get(),
-            color_temperature=int(self.temp_slider.get()),
-            color_tint=int(self.tint_slider.get()),
-            depixel_strength=int(self.depixel_slider.get()),
-            deblur_strength=int(self.deblur_slider.get()),
-            portrait_smooth=int(self.smooth_slider.get()),
-            eye_clarity=self.eye_slider.get(),
-            enable_fast_2x=bool(self.fast_2x_switch.get()),
-            max_megapixels=float(self.max_mp_slider.get()),
-            sr_style=self.style_seg.get().lower(),
-            output_format=self.fmt_seg.get(),
         )
+        for binding in self._param_bindings:
+            spec, getter = binding.spec, binding.get
+            value = getter()
+            if isinstance(spec.default, bool):
+                value = bool(value)
+            elif isinstance(spec.default, int):
+                value = int(value)
+            setattr(cfg, spec.config_field, value)
+        cfg.sr_style = self.style_seg.get().lower()
+        cfg.output_format = self.fmt_seg.get()
+        cfg.validate()
         return cfg
 
     def _preflight_guard(self, cfg: PipelineConfig) -> bool:
