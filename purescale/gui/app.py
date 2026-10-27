@@ -32,6 +32,7 @@ from purescale.gui.canvas import InteractiveCanvas
 from purescale.gui.components import DiagnosticsHUDCard, LabeledSlider, ParameterCard, PresetPicker
 from purescale.gui.paramspec import SEGMENT_WIDGET_ATTRS, build_param_bindings
 from purescale.gui.scrolling import SmoothScrollableFrame
+from purescale.gui.session import ImageState
 from purescale.pipeline import PureScalePipeline
 
 logger = logging.getLogger(__name__)
@@ -51,17 +52,10 @@ class PureScaleApp(ctk.CTk):
         self.minsize(1080, 720)
         self.configure(fg_color=PALETTE["bg_app"])
 
-        # Pipeline and state
+        # Pipeline and session — ImageState owns all image data and display
+        # state, shared with InteractiveCanvas to kill cross-layer reach-ins.
         self.pipeline = PureScalePipeline()
-        self.current_orig_bgr: Optional[np.ndarray] = None
-        self.current_enh_bgr: Optional[np.ndarray] = None
-        self.current_alpha: Optional[np.ndarray] = None
-        self.current_exif: Optional[bytes] = None
-        self.current_icc_profile: Optional[bytes] = None
-        self.current_file_path: Optional[str] = None
-        self.current_diagnostics: Optional[DiagnosticsResult] = None
-        self.current_result_grayscale: bool = False
-        self.is_processing: bool = False
+        self.session = ImageState()
 
         # Worker -> UI marshalling: workers never touch Tk from their own
         # thread (outside tkinter's thread contract); they post closures to
@@ -82,6 +76,79 @@ class PureScaleApp(ctk.CTk):
             ttk.Style().theme_use("clam")
         except tk.TclError:
             pass
+
+    # -- backward-compatible property aliases (tests reach into app state) --
+    @property
+    def current_orig_bgr(self) -> Optional[np.ndarray]:
+        return self.session.orig_bgr
+
+    @current_orig_bgr.setter
+    def current_orig_bgr(self, value: Optional[np.ndarray]) -> None:
+        self.session.orig_bgr = value
+
+    @property
+    def current_enh_bgr(self) -> Optional[np.ndarray]:
+        return self.session.enh_bgr
+
+    @current_enh_bgr.setter
+    def current_enh_bgr(self, value: Optional[np.ndarray]) -> None:
+        self.session.enh_bgr = value
+
+    @property
+    def current_alpha(self) -> Optional[np.ndarray]:
+        return self.session.alpha
+
+    @current_alpha.setter
+    def current_alpha(self, value: Optional[np.ndarray]) -> None:
+        self.session.alpha = value
+
+    @property
+    def current_exif(self) -> Optional[bytes]:
+        return self.session.exif
+
+    @current_exif.setter
+    def current_exif(self, value: Optional[bytes]) -> None:
+        self.session.exif = value
+
+    @property
+    def current_icc_profile(self) -> Optional[bytes]:
+        return self.session.icc_profile
+
+    @current_icc_profile.setter
+    def current_icc_profile(self, value: Optional[bytes]) -> None:
+        self.session.icc_profile = value
+
+    @property
+    def current_file_path(self) -> Optional[str]:
+        return self.session.file_path
+
+    @current_file_path.setter
+    def current_file_path(self, value: Optional[str]) -> None:
+        self.session.file_path = value
+
+    @property
+    def current_diagnostics(self) -> Optional[DiagnosticsResult]:
+        return self.session.diagnostics
+
+    @current_diagnostics.setter
+    def current_diagnostics(self, value: Optional[DiagnosticsResult]) -> None:
+        self.session.diagnostics = value
+
+    @property
+    def current_result_grayscale(self) -> bool:
+        return self.session.result_grayscale
+
+    @current_result_grayscale.setter
+    def current_result_grayscale(self, value: bool) -> None:
+        self.session.result_grayscale = value
+
+    @property
+    def is_processing(self) -> bool:
+        return self.session.is_processing
+
+    @is_processing.setter
+    def is_processing(self, value: bool) -> None:
+        self.session.is_processing = value
 
     def _detect_hardware(self) -> None:
         """Determines active hardware acceleration device name."""
@@ -208,7 +275,7 @@ class PureScaleApp(ctk.CTk):
         viewport_frame = ctk.CTkFrame(content_frame, fg_color=PALETTE["bg_app"], corner_radius=0)
         viewport_frame.pack(side="right", fill="both", expand=True)
 
-        self.canvas = InteractiveCanvas(viewport_frame)
+        self.canvas = InteractiveCanvas(viewport_frame, session=self.session)
         self.canvas.on_split_change = self._on_canvas_split_change
         self.canvas.on_zoom_change = self._on_zoom_change
         self.canvas.pack(fill="both", expand=True)
@@ -306,7 +373,7 @@ class PureScaleApp(ctk.CTk):
     def _on_close(self) -> None:
         """Confirm-and-cancel close protocol (default handler risks
         Tcl_AsyncDelete crashes when a worker thread is mid-after())."""
-        if self.is_processing:
+        if self.session.is_processing:
             if not messagebox.askyesno(
                 "Job Running",
                 "An enhancement job is still running.\nQuit and cancel it?",
@@ -337,7 +404,7 @@ class PureScaleApp(ctk.CTk):
         """Wraps a shortcut action with the processing/typing guards."""
 
         def handler(_event=None):
-            if self.is_processing:
+            if self.session.is_processing:
                 return  # buttons are disabled; shortcuts respect that too
             if self._typing_in_entry():
                 return
@@ -373,7 +440,7 @@ class PureScaleApp(ctk.CTk):
 
     def _finish_job(self) -> None:
         """Common post-job UI reset (complete / error / cancelled paths)."""
-        self.is_processing = False
+        self.session.is_processing = False
         self._cancel_event.clear()
         self.btn_cancel.configure(state="disabled")
         self.btn_enhance.configure(state="normal", text="Enhance Image")
@@ -412,12 +479,12 @@ class PureScaleApp(ctk.CTk):
         """Updates resolution status badge in top header."""
         if not hasattr(self, "res_badge"):
             return
-        if self.current_orig_bgr is None:
+        if self.session.orig_bgr is None:
             self.res_badge.configure(text="No Image", text_color=PALETTE["text_faint"])
             return
-        oh, ow = self.current_orig_bgr.shape[:2]
-        if self.current_enh_bgr is not None:
-            eh, ew = self.current_enh_bgr.shape[:2]
+        oh, ow = self.session.orig_bgr.shape[:2]
+        if self.session.enh_bgr is not None:
+            eh, ew = self.session.enh_bgr.shape[:2]
             scale_fac = ew / max(1, ow)
             self.res_badge.configure(
                 text=f"{ow}x{oh} -> {ew}x{eh} ({scale_fac:.1f}x)",
@@ -977,8 +1044,8 @@ class PureScaleApp(ctk.CTk):
         self.canvas.set_view_mode(view)
         if view == "split":
             self.split_ctrl_frame.pack(side="left", padx=(0, 10))
-            self.split_slider.set(self.canvas.split_pos)
-            self.split_label.configure(text=f"Split: {int(round(self.canvas.split_pos * 100))}%")
+            self.split_slider.set(self.session.split_pos)
+            self.split_label.configure(text=f"Split: {int(round(self.session.split_pos * 100))}%")
         else:
             self.split_ctrl_frame.pack_forget()
 
@@ -994,8 +1061,8 @@ class PureScaleApp(ctk.CTk):
 
     def _on_auto_style_toggle(self) -> None:
         """Immediately applies auto-detected style to the selector if switched on."""
-        if self.auto_style_switch.get() and self.current_diagnostics:
-            self._sync_routed_style(self.current_diagnostics)
+        if self.auto_style_switch.get() and self.session.diagnostics:
+            self._sync_routed_style(self.session.diagnostics)
 
     def _run_quick_diagnostics_async(self, bgr: np.ndarray) -> None:
         """Runs fast diagnostic signal analysis and updates the HUD.
@@ -1024,7 +1091,7 @@ class PureScaleApp(ctk.CTk):
         """Main-thread landing for the diagnostics worker; stale runs are dropped."""
         if gen != self._diag_generation:
             return  # a newer image was loaded meanwhile: these results are stale
-        self.current_diagnostics = diag
+        self.session.diagnostics = diag
         self.hud_card.update_diagnostics(diag)
         if auto_style_on:
             self._sync_routed_style(diag)
@@ -1033,8 +1100,8 @@ class PureScaleApp(ctk.CTk):
         """Resets all configuration sliders and preset to Balanced baseline."""
         self.preset_opt.set("Balanced")
         self._on_preset_change("Balanced")
-        if self.auto_style_switch.get() and self.current_diagnostics:
-            self._sync_routed_style(self.current_diagnostics)
+        if self.auto_style_switch.get() and self.session.diagnostics:
+            self._sync_routed_style(self.session.diagnostics)
         self._update_res_badge()
 
     def _open_file_dialog(self) -> None:
@@ -1052,7 +1119,7 @@ class PureScaleApp(ctk.CTk):
 
     def load_image(self, path: str) -> bool:
         """Loads an image into the application session, resetting viewport and parameters."""
-        if self.is_processing:
+        if self.session.is_processing:
             # Loading mid-job mixed the old job's result with the new image's
             # state (split view showing one image's original and another's
             # result; saves wrote old pixels with new metadata).
@@ -1062,14 +1129,14 @@ class PureScaleApp(ctk.CTk):
         try:
             from purescale.cli import load_image_with_alpha
             bgr, alpha, exif, icc = load_image_with_alpha(path, return_meta=True)
-            self.current_file_path = path
-            self.current_orig_bgr = bgr
-            self.current_alpha = alpha
-            self.current_exif = exif
-            self.current_icc_profile = icc
-            self.current_enh_bgr = None
-            self.current_result_grayscale = False
-            self.current_diagnostics = None
+            self.session.file_path = path
+            self.session.orig_bgr = bgr
+            self.session.alpha = alpha
+            self.session.exif = exif
+            self.session.icc_profile = icc
+            self.session.enh_bgr = None
+            self.session.result_grayscale = False
+            self.session.diagnostics = None
             self.hud_card.update_diagnostics(None)
 
             # Reset view mode to Original for the un-enhanced new image
@@ -1086,6 +1153,8 @@ class PureScaleApp(ctk.CTk):
 
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
             orig_pil = Image.fromarray(rgb)
+            self.session.orig_pil = orig_pil
+            self.session.enh_pil = None
             self.canvas.set_images(orig_pil, None)
 
             h, w = bgr.shape[:2]
@@ -1122,16 +1191,16 @@ class PureScaleApp(ctk.CTk):
 
     def _on_auto_enhance_click(self) -> None:
         """Executes autonomous auto-tuning and enhancement."""
-        if self.current_orig_bgr is None:
+        if self.session.orig_bgr is None:
             messagebox.showwarning("No Image", "Please load an image first.")
             return
 
-        if self.current_diagnostics is None:
-            self.current_diagnostics = diagnose_image(self.current_orig_bgr)
-            self.hud_card.update_diagnostics(self.current_diagnostics)
+        if self.session.diagnostics is None:
+            self.session.diagnostics = diagnose_image(self.session.orig_bgr)
+            self.hud_card.update_diagnostics(self.session.diagnostics)
 
-        self._sync_routed_style(self.current_diagnostics)
-        self._apply_diagnostics_to_ui(self.current_diagnostics)
+        self._sync_routed_style(self.session.diagnostics)
+        self._apply_diagnostics_to_ui(self.session.diagnostics)
         self._start_enhancement_async()
 
     def _get_current_config(self) -> PipelineConfig:
@@ -1173,7 +1242,7 @@ class PureScaleApp(ctk.CTk):
         instead of surfacing the pipeline's CLI-oriented error later.
         """
         try:
-            h0, w0 = self.current_orig_bgr.shape[:2]
+            h0, w0 = self.session.orig_bgr.shape[:2]
         except (AttributeError, ValueError, TypeError):
             return True
 
@@ -1225,18 +1294,18 @@ class PureScaleApp(ctk.CTk):
 
     def _start_enhancement_async(self) -> None:
         """Spawns enhancement worker thread."""
-        if self.current_orig_bgr is None:
+        if self.session.orig_bgr is None:
             messagebox.showwarning("No Image", "Please load an image first.")
             return
 
-        if self.is_processing:
+        if self.session.is_processing:
             return
 
         cfg = self._get_current_config()
         if not self._preflight_guard(cfg):
             return
 
-        self.is_processing = True
+        self.session.is_processing = True
         self._cancel_event.clear()
         self.btn_enhance.configure(state="disabled", text="Processing...")
         self.btn_auto.configure(state="disabled")
@@ -1248,8 +1317,8 @@ class PureScaleApp(ctk.CTk):
         # Freeze the inputs on the main thread: a worker reading shared state
         # while the user loads another image used to mix old results with new
         # state (split view showing one image's original and another's result).
-        bgr = self.current_orig_bgr
-        alpha = self.current_alpha
+        bgr = self.session.orig_bgr
+        alpha = self.session.alpha
         cancel_check = self._cancel_event.is_set
 
         def worker():
@@ -1308,11 +1377,11 @@ class PureScaleApp(ctk.CTk):
     def _on_enhancement_complete(self, res: ProcessingResult) -> None:
         self._finish_job()
         self.progress_bar.set(1.0)
-        self.current_enh_bgr = res.image
-        self.current_result_grayscale = res.is_grayscale
+        self.session.enh_bgr = res.image
+        self.session.result_grayscale = res.is_grayscale
 
         if res.diagnostics:
-            self.current_diagnostics = res.diagnostics
+            self.session.diagnostics = res.diagnostics
             self.hud_card.update_diagnostics(res.diagnostics)
             if self.auto_style_switch.get():
                 self._sync_routed_style(res.diagnostics)
@@ -1320,7 +1389,7 @@ class PureScaleApp(ctk.CTk):
         # Convert to PIL and update canvas
         rgb = cv2.cvtColor(res.image, cv2.COLOR_BGR2RGB)
         enh_pil = Image.fromarray(rgb)
-        self.canvas.set_images(self.canvas.orig_pil, enh_pil)
+        self.canvas.set_images(self.session.orig_pil, enh_pil)
 
         # Completion lands in Split View so the result compares against
         # the original immediately (replaces the old Original->Enhanced hop).
@@ -1355,10 +1424,10 @@ class PureScaleApp(ctk.CTk):
 
     def _save_file_dialog(self) -> None:
         """Prompts user to save enhanced image."""
-        if self.current_enh_bgr is None:
+        if self.session.enh_bgr is None:
             messagebox.showwarning("No Result", "No enhanced image available to save.")
             return
-        if self.is_processing:
+        if self.session.is_processing:
             self.status_label.configure(text="Busy: wait for the current job or cancel it.")
             return
 
@@ -1366,8 +1435,8 @@ class PureScaleApp(ctk.CTk):
         ext = ".png" if fmt == "PNG" else (".jpg" if fmt == "JPEG" else ".webp")
 
         init_file = "enhanced" + ext
-        if self.current_file_path:
-            base = os.path.splitext(os.path.basename(self.current_file_path))[0]
+        if self.session.file_path:
+            base = os.path.splitext(os.path.basename(self.session.file_path))[0]
             init_file = f"{base}_enhanced{ext}"
 
         dest_path = filedialog.asksaveasfilename(
@@ -1394,9 +1463,9 @@ class PureScaleApp(ctk.CTk):
         try:
             from purescale.cli import save_image_with_alpha
             save_image_with_alpha(
-                self.current_enh_bgr, self.current_alpha, dest_path, fmt,
-                exif=self.current_exif, icc_profile=self.current_icc_profile,
-                preserve_gray=self.current_result_grayscale,
+                self.session.enh_bgr, self.session.alpha, dest_path, fmt,
+                exif=self.session.exif, icc_profile=self.session.icc_profile,
+                preserve_gray=self.session.result_grayscale,
             )
             self.status_label.configure(text=f"Saved: {os.path.basename(dest_path)}")
         except (OSError, IOError, ValueError, cv2.error) as err:

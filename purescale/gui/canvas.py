@@ -5,56 +5,41 @@ from typing import Callable, Optional
 import numpy as np
 from PIL import Image, ImageTk
 
+from purescale.gui.session import ImageState
 from purescale.gui.theme import PALETTE, font
 
 
 class InteractiveCanvas(tk.Canvas):
     """
     High-performance viewport supporting pan, zoom, fit-to-window,
-    and side-by-side split-view divider compositing with interactive drag.
+    and side-by-side split-view comparison with interactive drag.
+
+    The canvas does not own display state — it reads and writes through the
+    shared ``ImageState`` session, which is also owned by ``PureScaleApp``.
+    This kills the cross-layer reach-ins where app and canvas each held
+    overlapping copies of the same image/viewport state.
     """
 
-    def __init__(self, master, **kwargs):
+    def __init__(self, master, session: Optional[ImageState] = None, **kwargs):
         kwargs.setdefault("bg", PALETTE["bg_app"])
         kwargs.setdefault("highlightthickness", 0)
         super().__init__(master, **kwargs)
 
-        self.orig_pil: Optional[Image.Image] = None
-        self.enh_pil: Optional[Image.Image] = None
-        self.view_mode: str = "enhanced"  # "enhanced", "original", "split"
-        self.split_pos: float = 0.5       # 0.0 to 1.0
-        self.dragging_divider: bool = False
+        self.session = session if session is not None else ImageState()
         self.on_split_change: Optional[Callable[[float], None]] = None
         self.on_zoom_change: Optional[Callable[[float], None]] = None
 
-        # Viewport transform
-        self.zoom_level: float = 1.0
-        self.pan_x: float = 0.0
-        self.pan_y: float = 0.0
+        # Transient UI state (not session state — owned by the canvas alone).
+        self.dragging_divider: bool = False
         self.drag_start_x: float = 0.0
         self.drag_start_y: float = 0.0
-        self.is_fit_mode: bool = True
+        self._wheel_delta: float = 0.0
+        self._WHEEL_NOTCH: float = 120.0
 
         self._tk_img: Optional[ImageTk.PhotoImage] = None
         self._redraw_after: Optional[str] = None
 
-        # Wheel-delta accumulator. Windows emits ~±120 per wheel notch while
-        # macOS trackpads emit tiny deltas (±1..2) per scroll event. Without
-        # accumulation every macOS micro-scroll would trigger a full 15% zoom,
-        # making the canvas feel hypersensitive. We accumulate until one
-        # "notch" worth of delta has built up, then zoom once.
-        self._wheel_delta: float = 0.0
-        self._WHEEL_NOTCH = 120.0
-
-        # Display-size resizes, cached across redraws. Redraw fires on every
-        # divider-drag and pan frame; without the cache each frame re-runs
-        # PIL LANCZOS/BILINEAR over multi-megapixel sources (hundreds of ms
-        # on a 28 MP split view — divider drags feel broken). Keys include
-        # the PIL object identity and the exact resize parameters, so a hit
-        # is always the same pixels the uncached path would have produced.
-        # Entries hold a strong reference to the source PIL image, which
-        # prevents id() reuse from ever producing a stale hit; set_images
-        # clears the cache when the displayed images change.
+        # Display-size resizes, cached across redraws.
         self._disp_cache: dict = {}
 
         # Bind event handlers
@@ -69,11 +54,56 @@ class InteractiveCanvas(tk.Canvas):
         self.bind("<Button-5>", lambda e: self._zoom_at(e.x, e.y, 0.85))
         self.bind("<Double-Button-1>", self._on_double_click)
 
+    # -- session pass-through (keeps a small public surface for tests) --------
+
+    @property
+    def view_mode(self) -> str:
+        return self.session.view_mode
+
+    @view_mode.setter
+    def view_mode(self, value: str) -> None:
+        self.session.view_mode = value
+
+    @property
+    def orig_pil(self) -> Optional[Image.Image]:
+        return self.session.orig_pil
+
+    @orig_pil.setter
+    def orig_pil(self, value: Optional[Image.Image]) -> None:
+        self.session.orig_pil = value
+
+    @property
+    def enh_pil(self) -> Optional[Image.Image]:
+        return self.session.enh_pil
+
+    @enh_pil.setter
+    def enh_pil(self, value: Optional[Image.Image]) -> None:
+        self.session.enh_pil = value
+
+    @property
+    def is_fit_mode(self) -> bool:
+        return self.session.is_fit_mode
+
+    @is_fit_mode.setter
+    def is_fit_mode(self, value: bool) -> None:
+        self.session.is_fit_mode = value
+
+    @property
+    def zoom_level(self) -> float:
+        return self.session.zoom_level
+
+    @zoom_level.setter
+    def zoom_level(self, value: float) -> None:
+        self.session.zoom_level = value
+
+    # -- display state -------------------------------------------------------
+
     def _active_ref_image(self) -> Optional[Image.Image]:
         """Returns the PIL image that defines the active display geometry."""
-        if self.view_mode == "original":
-            return self.orig_pil
-        return self.enh_pil or self.orig_pil
+        s = self.session
+        if s.view_mode == "original":
+            return s.orig_pil
+        return s.enh_pil or s.orig_pil
 
     def set_images(
         self,
@@ -81,11 +111,12 @@ class InteractiveCanvas(tk.Canvas):
         enh: Optional[Image.Image],
     ) -> None:
         """Sets active images and fits the viewport on a new source or in fit mode."""
-        prev_orig = self.orig_pil
-        prev_enh = self.enh_pil
+        s = self.session
+        prev_orig = s.orig_pil
+        prev_enh = s.enh_pil
 
-        self.orig_pil = orig
-        self.enh_pil = enh
+        s.orig_pil = orig
+        s.enh_pil = enh
         # New displayed images invalidate every cached resize (entries may
         # also simply fall out via their identity key, but keeping the cache
         # bounded starts here).
@@ -105,42 +136,43 @@ class InteractiveCanvas(tk.Canvas):
             )
         )
 
-        if is_new_source or self.is_fit_mode:
-            self.is_fit_mode = True
+        if is_new_source or s.is_fit_mode:
+            s.is_fit_mode = True
             self.fit_to_window()
         else:
             # If not in fit mode, keep visual alignment when resolution changes
             if prev_enh is None and enh is not None and prev_orig is not None and enh.size[0] > 0:
                 scale_change = float(orig.size[0]) / float(enh.size[0])
-                self.zoom_level = max(0.01, self.zoom_level * scale_change)
+                s.zoom_level = max(0.01, s.zoom_level * scale_change)
                 self._notify_zoom_change()
             self.redraw()
 
     def set_view_mode(self, mode: str) -> None:
         """Updates display mode: 'enhanced', 'original', or 'split'."""
-        self.view_mode = mode.lower()
-        if self.is_fit_mode:
+        self.session.view_mode = mode.lower()
+        if self.session.is_fit_mode:
             self.fit_to_window()
         else:
             self.redraw()
 
     def set_split_pos(self, pos: float, notify: bool = True) -> None:
         """Sets divider position (0.0 to 1.0) and redraws."""
-        self.split_pos = float(np.clip(pos, 0.0, 1.0))
+        self.session.split_pos = float(np.clip(pos, 0.0, 1.0))
         if notify and self.on_split_change:
-            self.on_split_change(self.split_pos)
+            self.on_split_change(self.session.split_pos)
         self.redraw()
 
     def _notify_zoom_change(self) -> None:
         """Notifies registered listener of zoom change."""
         if self.on_zoom_change:
             try:
-                self.on_zoom_change(self.zoom_level)
+                self.on_zoom_change(self.session.zoom_level)
             except Exception:
                 pass
 
     def fit_to_window(self) -> None:
         """Calculates optimal zoom factor to fit active image inside viewport."""
+        s = self.session
         ref = self._active_ref_image()
         if ref is None:
             return
@@ -174,17 +206,18 @@ class InteractiveCanvas(tk.Canvas):
         pad = 40
         scale_w = max(10, cw - pad) / float(iw)
         scale_h = max(10, ch - pad) / float(ih)
-        self.zoom_level = max(0.01, min(scale_w, scale_h))
+        s.zoom_level = max(0.01, min(scale_w, scale_h))
 
-        self.pan_x = (cw - iw * self.zoom_level) / 2.0
-        self.pan_y = (ch - ih * self.zoom_level) / 2.0
-        self.is_fit_mode = True
+        s.pan_x = (cw - iw * s.zoom_level) / 2.0
+        s.pan_y = (ch - ih * s.zoom_level) / 2.0
+        s.is_fit_mode = True
         self._notify_zoom_change()
         self.redraw()
 
     def zoom_step(self, factor: float) -> None:
         """Zooms centered on viewport."""
-        self.is_fit_mode = False
+        s = self.session
+        s.is_fit_mode = False
         ref = self._active_ref_image()
         if ref is None:
             return
@@ -192,46 +225,48 @@ class InteractiveCanvas(tk.Canvas):
         cw = self.winfo_width() / 2.0
         ch = self.winfo_height() / 2.0
 
-        new_zoom = max(0.01, min(20.0, self.zoom_level * factor))
-        ratio = new_zoom / self.zoom_level
-        self.zoom_level = new_zoom
+        new_zoom = max(0.01, min(20.0, s.zoom_level * factor))
+        ratio = new_zoom / s.zoom_level
+        s.zoom_level = new_zoom
 
-        self.pan_x = cw - (cw - self.pan_x) * ratio
-        self.pan_y = ch - (ch - self.pan_y) * ratio
+        s.pan_x = cw - (cw - s.pan_x) * ratio
+        s.pan_y = ch - (ch - s.pan_y) * ratio
         self._clamp_pan()
         self._notify_zoom_change()
         self.redraw()
 
     def zoom_100(self) -> None:
         """Sets zoom to exactly 1.0 (100% native pixels)."""
-        self.is_fit_mode = False
+        s = self.session
+        s.is_fit_mode = False
         cw = self.winfo_width() / 2.0
         ch = self.winfo_height() / 2.0
-        ratio = 1.0 / self.zoom_level
-        self.zoom_level = 1.0
-        self.pan_x = cw - (cw - self.pan_x) * ratio
-        self.pan_y = ch - (ch - self.pan_y) * ratio
+        ratio = 1.0 / s.zoom_level
+        s.zoom_level = 1.0
+        s.pan_x = cw - (cw - s.pan_x) * ratio
+        s.pan_y = ch - (ch - s.pan_y) * ratio
         self._clamp_pan()
         self._notify_zoom_change()
         self.redraw()
 
     def _on_resize(self, event) -> None:
-        if self.is_fit_mode and self._active_ref_image() is not None:
+        s = self.session
+        if s.is_fit_mode and self._active_ref_image() is not None:
             self.fit_to_window()
         else:
             self._request_redraw()
 
     def _get_divider_screen_x(self) -> Optional[int]:
         """Returns the current screen X coordinate of the split divider, if visible."""
-        if self.view_mode != "split" or self.orig_pil is None or self.enh_pil is None:
+        s = self.session
+        if s.view_mode != "split" or s.orig_pil is None or s.enh_pil is None:
             return None
         ref = self._active_ref_image()
         if ref is None:
             return None
-        disp_w = max(1, int(round(ref.size[0] * self.zoom_level)))
-        x1 = int(round(self.pan_x))
-        return x1 + int(round(disp_w * self.split_pos))
-
+        disp_w = max(1, int(round(ref.size[0] * s.zoom_level)))
+        x1 = int(round(s.pan_x))
+        return x1 + int(round(disp_w * s.split_pos))
 
     def _on_mouse_move(self, event) -> None:
         """Changes cursor to resize cursor when hovering near the split divider."""
@@ -252,29 +287,30 @@ class InteractiveCanvas(tk.Canvas):
         self.drag_start_y = event.y
 
     def _on_drag_motion(self, event) -> None:
+        s = self.session
         if self.dragging_divider:
             ref = self._active_ref_image()
             if ref:
-                disp_w = max(1, int(round(ref.size[0] * self.zoom_level)))
-                x1 = int(round(self.pan_x))
+                disp_w = max(1, int(round(ref.size[0] * s.zoom_level)))
+                x1 = int(round(s.pan_x))
                 rel = (event.x - x1) / float(disp_w)
-                self.split_pos = float(np.clip(rel, 0.0, 1.0))
+                s.split_pos = float(np.clip(rel, 0.0, 1.0))
                 if self.on_split_change:
-                    self.on_split_change(self.split_pos)
+                    self.on_split_change(s.split_pos)
                 self._request_redraw()
             return
 
         dx = event.x - self.drag_start_x
         dy = event.y - self.drag_start_y
         if abs(dx) > 1 or abs(dy) > 1:
-            self.is_fit_mode = False
+            s.is_fit_mode = False
             # Leaving fit mode changes the label basis; refresh the header
             # immediately (it used to go stale until the next zoom action).
             self._notify_zoom_change()
         self.drag_start_x = event.x
         self.drag_start_y = event.y
-        self.pan_x += dx
-        self.pan_y += dy
+        s.pan_x += dx
+        s.pan_y += dy
         self._clamp_pan()
         self._request_redraw()
 
@@ -299,6 +335,7 @@ class InteractiveCanvas(tk.Canvas):
 
     def _clamp_pan(self) -> None:
         """Keeps at least a margin of the image visible so it can't get lost."""
+        s = self.session
         ref = self._active_ref_image()
         if ref is None:
             return
@@ -307,11 +344,11 @@ class InteractiveCanvas(tk.Canvas):
             ch = max(1, self.winfo_height())
         except (RuntimeError, tk.TclError):
             return
-        disp_w = max(1, int(round(ref.size[0] * self.zoom_level)))
-        disp_h = max(1, int(round(ref.size[1] * self.zoom_level)))
+        disp_w = max(1, int(round(ref.size[0] * s.zoom_level)))
+        disp_h = max(1, int(round(ref.size[1] * s.zoom_level)))
         margin = 80
-        self.pan_x = min(cw - margin, max(margin - disp_w, self.pan_x))
-        self.pan_y = min(ch - margin, max(margin - disp_h, self.pan_y))
+        s.pan_x = min(cw - margin, max(margin - disp_w, s.pan_x))
+        s.pan_y = min(ch - margin, max(margin - disp_h, s.pan_y))
 
     def _on_drag_release(self, event) -> None:
         self.dragging_divider = False
@@ -327,7 +364,7 @@ class InteractiveCanvas(tk.Canvas):
     def _on_mouse_wheel(self, event) -> None:
         """Zoom on wheel scroll, with platform-normalized delta.
 
-        Windows emits ~±120 per wheel notch; macOS trackpads emit tiny
+        Windows emits ~±120 per wheel notch while macOS trackpads emit tiny
         deltas per scroll event. Accumulate until one notch has built up,
         then apply a single zoom step so the canvas feels consistent across
         platforms instead of hypersensitive on macOS.
@@ -340,16 +377,17 @@ class InteractiveCanvas(tk.Canvas):
         self._zoom_at(event.x, event.y, factor)
 
     def _zoom_at(self, cx: float, cy: float, factor: float) -> None:
-        self.is_fit_mode = False
+        s = self.session
+        s.is_fit_mode = False
         ref = self._active_ref_image()
         if ref is None:
             return
-        new_zoom = max(0.01, min(20.0, self.zoom_level * factor))
-        ratio = new_zoom / self.zoom_level
-        self.zoom_level = new_zoom
+        new_zoom = max(0.01, min(20.0, s.zoom_level * factor))
+        ratio = new_zoom / s.zoom_level
+        s.zoom_level = new_zoom
 
-        self.pan_x = cx - (cx - self.pan_x) * ratio
-        self.pan_y = cy - (cy - self.pan_y) * ratio
+        s.pan_x = cx - (cx - s.pan_x) * ratio
+        s.pan_y = cy - (cy - s.pan_y) * ratio
         self._clamp_pan()
         self._notify_zoom_change()
         self._request_redraw()
@@ -384,6 +422,7 @@ class InteractiveCanvas(tk.Canvas):
 
     def redraw(self) -> None:
         """Composites and renders active view mode."""
+        s = self.session
         self.delete("all")
         ref = self._active_ref_image()
         if ref is None:
@@ -409,19 +448,19 @@ class InteractiveCanvas(tk.Canvas):
         # Cap preview allocation: zooming a 4K image to 1500% would otherwise
         # allocate gigapixel temporaries. Clamp display size; pan stays exact.
         max_side = 4096
-        disp_w = max(1, int(round(ref.size[0] * self.zoom_level)))
-        disp_h = max(1, int(round(ref.size[1] * self.zoom_level)))
+        disp_w = max(1, int(round(ref.size[0] * s.zoom_level)))
+        disp_h = max(1, int(round(ref.size[1] * s.zoom_level)))
         if max(disp_w, disp_h) > max_side:
             fit = max_side / float(max(disp_w, disp_h))
             disp_w = max(1, int(round(disp_w * fit)))
             disp_h = max(1, int(round(disp_h * fit)))
-        resample = self._resample_filter(self.zoom_level)
+        resample = self._resample_filter(s.zoom_level)
 
-        x1 = int(round(self.pan_x))
-        y1 = int(round(self.pan_y))
+        x1 = int(round(s.pan_x))
+        y1 = int(round(s.pan_y))
 
         # View Mode: Single Image
-        if self.view_mode != "split" or self.orig_pil is None or self.enh_pil is None:
+        if s.view_mode != "split" or s.orig_pil is None or s.enh_pil is None:
             active_pil = self._active_ref_image()
             if active_pil is not None:
                 resized = self._display_image(active_pil, disp_w, disp_h, resample)
@@ -432,10 +471,10 @@ class InteractiveCanvas(tk.Canvas):
         # View Mode: Split Comparison
         # Harmonize original to enhanced display geometry (cached across
         # divider-drag frames: pan/zoom unchanged -> pure paste work).
-        enh_disp = self._display_image(self.enh_pil, disp_w, disp_h, resample)
-        orig_disp = self._display_image(self.orig_pil, disp_w, disp_h, resample)
+        enh_disp = self._display_image(s.enh_pil, disp_w, disp_h, resample)
+        orig_disp = self._display_image(s.orig_pil, disp_w, disp_h, resample)
 
-        divider_x = int(disp_w * self.split_pos)
+        divider_x = int(disp_w * s.split_pos)
 
         # Composite left half (Original) and right half (Enhanced)
         composite = Image.new("RGB", (disp_w, disp_h))
